@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="<%= require('./images/favicon.png') %>">
+    <title>Flight Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            padding: 0;
+            margin: 0;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            z-index: 100;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        
+        #reset {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            margin-top: 10px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+        }
+        #reset:hover { background: #45a049; }
+        #reset:active { background: #3e8e41; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info">
+            <h1>Flight Simulator</h1>
+            <div>Speed: <span id="speed">0</span> km/h</div>
+            <div>Altitude: <span id="altitude">0</span> m</div>
+        </div>
+        
+        <div id="controls">
+            <strong>Controls:</strong><br>
+            W/S - Pitch<br>
+            A/D - Roll<br>
+            Q/E - Yaw<br>
+            Shift/Ctrl - Throttle<br>
+            Space - Brake<br>
+            <button id="reset">Reset</button>
+        </div>
+    </div>
+</body>
+</html>
