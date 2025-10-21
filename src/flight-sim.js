@@ -21,6 +21,8 @@ const USE_ORBIT_CONTROLS = true;
 const DEBUG = true;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
+let sunAngle = 180;
+
 /**
  * Adds visual helpers to the scene for debugging.
  * Includes axis helper, grid helper, and a light helper.
@@ -35,6 +37,25 @@ function addHelpers() {
 
     const lightHelper = new THREE.DirectionalLightHelper(SKY.userData.sunLight, 5);
     SCENE.add(lightHelper);
+
+    const controlsGroup = document.getElementById('controls') || document.createElement('div');
+    controlsGroup.id = 'controls';
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '360';
+    slider.value = '90';
+    slider.id = 'sunSlider';
+    controlsGroup.appendChild(slider);
+
+    if (!document.getElementById('controls')) {
+        document.body.appendChild(controlsGroup);
+    }
+
+    slider.addEventListener('input', (event) => {
+        sunAngle = parseFloat(event.target.value);
+    })
 }
 
 if (DEBUG) {
@@ -141,14 +162,20 @@ function initializeSky(scene) {
  */
 function updateSky() {
     const time = Date.now() * 0.001;
+    let phi;
 
-    const phi = THREE.MathUtils.degToRad(180 - (time * 10 % 360));
+    if (DEBUG) {
+        phi = THREE.MathUtils.degToRad(sunAngle);
+    } else {
+        phi = THREE.MathUtils.degToRad(180 - (time * 10 % 360));
+    }
     const theta = THREE.MathUtils.degToRad(180);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
     SKY.material.uniforms.sunPosition.value = sunPosition;
     SKY.userData.sunLight.position.copy(sunPosition);
     SKY.userData.sunLight.lookAt(0, 0, 0);
+    SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
 }
 
 /**
@@ -161,5 +188,11 @@ function animate() {
     CONTROLLER.update();
     RENDERER.render(SCENE, CAMERA);
 }
-
 animate();
+
+/**
+ * Reset the scene back to default
+ * */
+function reset() {
+
+}
