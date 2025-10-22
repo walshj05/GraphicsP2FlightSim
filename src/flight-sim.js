@@ -9,23 +9,28 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
-import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
+import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
+// import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
+//
+// const WING_SPAN = 11; // meters
+// const MAX_SPEED = 55; // m/s
+// const MAX_ALTITUDE = 4200; // meters
+// const GRAVITY = 9.81; // m/s^2
+// const SQUARE_SIZE = 2000; // meters
 
-const WING_SPAN = 11; // meters
-const MAX_SPEED = 55; // m/s
-const MAX_ALTITUDE = 4200; // meters
-const GRAVITY = 9.81; // m/s^2
-const SQUARE_SIZE = 2000; // meters
-
+//for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = true;
+const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
+// for sky
 let sunAngle = 180;
+let sunState = { phiDeg: 0 };
+let tweenStarted = false;
 
 /**
  * Adds visual helpers to the scene for debugging.
- * Includes axis helper, grid helper, and a light helper.
+ * Includes axis-helper, grid helper, and a light helper.
  * @returns {void}
  */
 function addHelpers() {
@@ -83,6 +88,7 @@ function initScene() {
     container.appendChild(renderer.domElement);
 
     const controls = initializeOrbitControls(camera, renderer);
+    const aircraft = initializeAircraft(scene)
 
     camera.position.set(4, 1, 9);
     camera.lookAt(0, 0, 0);
@@ -97,7 +103,7 @@ function initScene() {
         sunDirectionalLight.target = sphere;
     }
 
-    return [scene, camera, renderer, controls, sky];
+    return [scene, camera, renderer, controls, sky, aircraft];
 }
 
 /**
@@ -114,7 +120,7 @@ function initializeOrbitControls(camera, renderer) {
 }
 
 /**
- * Adds ambient light and a directional sunlight to the scene.
+ * Adds ambient light and directional sunlight to the scene.
  * Links the sun to the sky system for dynamic updates.
  * @param {THREE.Scene} scene - Scene to modify.
  * @param {THREE.Vector3} sunPosition - Initial sun direction.
@@ -157,26 +163,124 @@ function initializeSky(scene) {
 }
 
 /**
- * Updates the sun position over time to simulate a moving sky.
- * @returns {void}
+ * Creates a mock aircraft
+ * @param {THREE.Scene} scene - Scene to attach the aircraft
+ * @return aircraft
+ * */
+function initializeAircraft(scene) {
+    const aircraft = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3333ff });
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0x777777 });
+    const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x87ceeb, transparent: true, opacity: 0.6 });
+    const propMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const fuselage = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 1, 8, 16),
+        bodyMat
+    );
+    fuselage.rotation.z = Math.PI / 2;
+    aircraft.add(fuselage);
+
+    const cockpit = new THREE.Mesh(
+        new THREE.SphereGeometry(0.9, 16, 16),
+        cockpitMat
+    );
+    cockpit.position.set(4, 0.3, 0);
+    aircraft.add(cockpit);
+
+    const leftWing = new THREE.Mesh(
+        new THREE.BoxGeometry(6, 0.1, 1),
+        wingMat
+    );
+    leftWing.position.set(0, 0, -1.5);
+    aircraft.add(leftWing);
+
+    const rightWing = leftWing.clone();
+    rightWing.position.z = 1.5;
+    aircraft.add(rightWing);
+
+    const tailLeft = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 0.05, 0.5),
+        tailMat
+    );
+    tailLeft.position.set(-3.5, 0.2, -0.5);
+    aircraft.add(tailLeft);
+
+    const tailRight = tailLeft.clone();
+    tailRight.position.z = 0.5;
+    aircraft.add(tailRight);
+
+    const tailFin = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 1, 0.5),
+        tailMat
+    );
+    tailFin.position.set(-3.5, 0.7, 0);
+    aircraft.add(tailFin);
+
+    const propHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.2, 0.2, 12),
+        propMat
+    );
+    propHub.rotation.z = Math.PI / 2;
+    propHub.position.set(4.3, 0, 0);
+    aircraft.add(propHub);
+    const blade1 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 2, 0.05),
+        propMat
+    );
+    blade1.position.set(4.4, 0, 0);
+    aircraft.add(blade1);
+
+    const blade2 = blade1.clone();
+    blade2.rotation.x = Math.PI / 2;
+
+    aircraft.add(blade2);
+    aircraft.userData.propeller = [blade1, blade2];
+    aircraft.scale.set(0.5, 0.5, 0.5);
+    aircraft.position.set(0, 0, 0);
+
+    if(!DEBUG) {
+        scene.add(aircraft);
+    }
+
+    return aircraft;
+}
+
+/**
+ * Updates the sun's position over time to simulate a moving sky.
  */
 function updateSky() {
-    const time = Date.now() * 0.001;
-    let phi;
-
     if (DEBUG) {
-        phi = THREE.MathUtils.degToRad(sunAngle);
+        sunState.phiDeg = sunAngle;
     } else {
-        phi = THREE.MathUtils.degToRad(180 - (time * 10 % 360));
+        if (!tweenStarted) {
+            new TWEEN.Tween(sunState)
+                .to({ phiDeg: 360 }, 60000)
+                .onUpdate(() => {})
+                .repeat(Infinity)
+                .start();
+            tweenStarted = true;
+        }
+        TWEEN.update();
     }
     const theta = THREE.MathUtils.degToRad(180);
+    const phi = THREE.MathUtils.degToRad(180 - sunState.phiDeg);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-
-    SKY.material.uniforms.sunPosition.value = sunPosition;
+    SKY.material.uniforms.sunPosition.value.copy(sunPosition);
     SKY.userData.sunLight.position.copy(sunPosition);
     SKY.userData.sunLight.lookAt(0, 0, 0);
     SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
 }
+
+
+// /**
+//  * Update Fog Color based on sky
+//  * */
+// function updateFogColor() {
+//
+// }
+
+
 
 /**
  * Animation loop: updates sky, orbit controls, and renders each frame.
@@ -190,9 +294,9 @@ function animate() {
 }
 animate();
 
-/**
- * Reset the scene back to default
- * */
-function reset() {
-
-}
+// /**
+//  * Reset the scene back to default
+//  * */
+// function reset() {
+//
+// }
