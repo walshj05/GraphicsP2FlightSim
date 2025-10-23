@@ -13,23 +13,120 @@ import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 
-// import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
+import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
+
+
 //
 // const WING_SPAN = 11; // meters
 // const MAX_SPEED = 55; // m/s
 // const MAX_ALTITUDE = 4200; // meters
 // const GRAVITY = 9.81; // m/s^2
-// const SQUARE_SIZE = 2000; // meters
+const SQUARE_SIZE = 2000; // meters
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
 const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
+const chunkHeights = {};
+const neighborDirections = [
+    [0, 0], [1, 0], [-1, 0],
+    [0, 1], [0, -1],
+    [1, 1], [-1, -1],
+    [1, -1], [-1, 1]
+];
+let AIRCRAFT; // for airplane
 
 // for sky
 let sunAngle = 180;
 let sunState = { phiDeg: 0 };
 let tweenStarted = false;
+
+// textures and materials
+const terrainTexture = new THREE.TextureLoader().load(new URL('https://cdn.architextures.org/textures/23/10/grass-none-e6q3dt.jpg', import.meta.url).href);
+terrainTexture.wrapS = THREE.RepeatWrapping;
+terrainTexture.wrapT = THREE.RepeatWrapping;
+terrainTexture.repeat.set( 10, 10 );
+const terrainMaterial = new THREE.MeshStandardMaterial({ map: terrainTexture });
+
+/**
+ * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
+ * @param {*} x integer x position
+ * @param {*} y integer y position
+ * @returns 
+ */
+function addTerrainChunk(x, y) {
+    const key = `${x},${y}`;
+    if (chunkHeights[key]) {
+        return; // Chunk already exists
+    }
+    
+    // Determine edge indexes
+    const topIndex = `${x},${y + 1}`;
+    const bottomIndex = `${x},${y - 1}`;
+    const leftIndex = `${x - 1},${y}`;
+    const rightIndex = `${x + 1},${y}`;
+    const topEdge = chunkHeights[topIndex] ? extractBottom(chunkHeights[topIndex]) : null;
+    const bottomEdge = chunkHeights[bottomIndex] ? extractTop(chunkHeights[bottomIndex]) : null;
+    const leftEdge = chunkHeights[leftIndex] ? extractRight(chunkHeights[leftIndex]) : null;
+    const rightEdge = chunkHeights[rightIndex] ? extractLeft(chunkHeights[rightIndex]) : null;
+
+    // Generate new terrain chunk with edge constraints
+    const newTerrain = generateTerrain(5, 5, {
+        top: topEdge,
+        bottom: bottomEdge,
+        left: leftEdge,
+        right: rightEdge
+    });
+    chunkHeights[key] = newTerrain;
+    addTerrainMesh(x, y);
+}
+
+/**
+ * Generates terrain chunks for the specified (x, y) grid position and its 8 neighbors.
+ * @param {*} x integer x position
+ * @param {*} y integer y position
+ * @returns 
+ */
+function generateNeighboringChunks(x, y) {
+    // Generate the central chunk and its 8 neighbors
+    addTerrainChunk(x, y);
+    for (const [dx, dy] of neighborDirections) {
+        addTerrainChunk(x + dx, y + dy);
+    }
+}
+
+/**
+ * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
+ * @param {*} x integer x position
+ * @param {*} y integer y position
+ * @returns 
+ */
+function addTerrainMesh(x, y) {
+    const key = `${x},${y}`;
+    const terrainData = chunkHeights[key];
+    if (!terrainData) {
+        return; // No terrain data available
+    }
+    
+    const size = terrainData.length - 1;
+    const geometry = new THREE.PlaneGeometry(SQUARE_SIZE, SQUARE_SIZE, size, size);
+    const mesh = new THREE.Mesh(geometry, terrainMaterial);
+    for (let i = 0; i <= size; i++) {
+        for (let j = 0; j <= size; j++) {
+            const vertexIndex = i * (size + 1) + j;
+            geometry.attributes.position.setZ(vertexIndex, terrainData[i][j]);
+        }
+    }
+    geometry.computeVertexNormals();
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = Math.PI; // Correct orientation
+    mesh.position.set(x * SQUARE_SIZE, -100, y * SQUARE_SIZE);
+
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    SCENE.add(mesh);
+}
+
 
 /**
  * Adds visual helpers to the scene for debugging.
@@ -135,6 +232,11 @@ function initializeLights(scene, sunPosition, sky) {
     scene.add(ambientLight);
 
     const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    sunDirectionalLight.castShadow = true;
+    sunDirectionalLight.shadow.mapSize.width = 2048;
+    sunDirectionalLight.shadow.mapSize.height = 2048;
+    sunDirectionalLight.shadow.camera.near = 0.5;
+    sunDirectionalLight.shadow.camera.far = 1000;
     sunDirectionalLight.position.copy(sunPosition);
     scene.add(sunDirectionalLight);
 
@@ -189,7 +291,10 @@ function initializeAircraft(scene) {
             });
             object.scale.set(0.01, 0.01, 0.01);
             object.rotation.x = -Math.PI / 2;
+            object.position.y = 5000;
             object.position.set(0, -1, 0);
+            AIRCRAFT = object;
+            AIRCRAFT.castShadow = true;
             if (!DEBUG) { scene.add(object) }
         });
     });
@@ -221,6 +326,15 @@ function updateSky() {
     SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
 }
 
+/**
+ * Checks the aircraft's position and generates new terrain chunks as needed.
+ */
+function checkTerrainUpdate() {
+    const planePosition = AIRCRAFT.position;
+    const chunkX = Math.floor(planePosition.x / SQUARE_SIZE);
+    const chunkY = Math.floor(planePosition.z / SQUARE_SIZE);
+    generateNeighboringChunks(chunkX, chunkY);
+}
 
 // /**
 //  * Update Fog Color based on sky
@@ -237,6 +351,9 @@ function updateSky() {
  */
 function animate() {
     requestAnimationFrame(animate);
+    if (AIRCRAFT) {
+        checkTerrainUpdate();
+    }
     updateSky();
     CONTROLLER.update();
     RENDERER.render(SCENE, CAMERA);
