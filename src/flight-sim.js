@@ -10,6 +10,9 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
+
 // import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 //
 // const WING_SPAN = 11; // meters
@@ -157,7 +160,6 @@ function initializeSky(scene) {
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
     sky.material.uniforms.sunPosition.value = sunPosition;
-
     scene.add(sky);
     return { sunPosition, sky };
 }
@@ -168,82 +170,29 @@ function initializeSky(scene) {
  * @return aircraft
  * */
 function initializeAircraft(scene) {
-    const aircraft = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3333ff });
-    const wingMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0x777777 });
-    const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x87ceeb, transparent: true, opacity: 0.6 });
-    const propMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-    const fuselage = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.5, 1, 8, 16),
-        bodyMat
-    );
-    fuselage.rotation.z = Math.PI / 2;
-    aircraft.add(fuselage);
+    const mtlPath = new URL('./models/11804_Airplane_v2_l2.mtl', import.meta.url).href;
+    const objPath = new URL('./models/11804_Airplane_v2_l2.obj', import.meta.url).href;
+    const texPath = new URL('./images/11804_Airplane_diff.jpg', import.meta.url).href;
 
-    const cockpit = new THREE.Mesh(
-        new THREE.SphereGeometry(0.9, 16, 16),
-        cockpitMat
-    );
-    cockpit.position.set(4, 0.3, 0);
-    aircraft.add(cockpit);
-
-    const leftWing = new THREE.Mesh(
-        new THREE.BoxGeometry(6, 0.1, 1),
-        wingMat
-    );
-    leftWing.position.set(0, 0, -1.5);
-    aircraft.add(leftWing);
-
-    const rightWing = leftWing.clone();
-    rightWing.position.z = 1.5;
-    aircraft.add(rightWing);
-
-    const tailLeft = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 0.05, 0.5),
-        tailMat
-    );
-    tailLeft.position.set(-3.5, 0.2, -0.5);
-    aircraft.add(tailLeft);
-
-    const tailRight = tailLeft.clone();
-    tailRight.position.z = 0.5;
-    aircraft.add(tailRight);
-
-    const tailFin = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 1, 0.5),
-        tailMat
-    );
-    tailFin.position.set(-3.5, 0.7, 0);
-    aircraft.add(tailFin);
-
-    const propHub = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.2, 0.2, 0.2, 12),
-        propMat
-    );
-    propHub.rotation.z = Math.PI / 2;
-    propHub.position.set(4.3, 0, 0);
-    aircraft.add(propHub);
-    const blade1 = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 2, 0.05),
-        propMat
-    );
-    blade1.position.set(4.4, 0, 0);
-    aircraft.add(blade1);
-
-    const blade2 = blade1.clone();
-    blade2.rotation.x = Math.PI / 2;
-
-    aircraft.add(blade2);
-    aircraft.userData.propeller = [blade1, blade2];
-    aircraft.scale.set(0.5, 0.5, 0.5);
-    aircraft.position.set(0, 0, 0);
-
-    if(!DEBUG) {
-        scene.add(aircraft);
-    }
-
-    return aircraft;
+    const mtlLoader = new MTLLoader();
+    mtlLoader.load(mtlPath, (materials) => {
+        materials.preload();
+        const objLoader = new OBJLoader();
+        objLoader.setMaterials(materials);
+        objLoader.load(objPath, (object) => {
+            const texture = new THREE.TextureLoader().load(texPath);
+            object.traverse((child) => {
+                if (child.isMesh) {
+                    child.material.map = texture;
+                    child.material.needsUpdate = true;
+                }
+            });
+            object.scale.set(0.01, 0.01, 0.01);
+            object.rotation.x = -Math.PI / 2;
+            object.position.set(0, -1, 0);
+            if (!DEBUG) { scene.add(object) }
+        });
+    });
 }
 
 /**
