@@ -12,20 +12,16 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
-
 import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 
-
-//
 // const WING_SPAN = 11; // meters
 // const MAX_SPEED = 55; // m/s
 // const MAX_ALTITUDE = 4200; // meters
 // const GRAVITY = 9.81; // m/s^2
 
-
 //for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = false;
+const DEBUG = true;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
 // for airplane
@@ -33,8 +29,9 @@ let AIRCRAFT;
 
 // for sky
 let sunAngle = 180;
-let sunState = { phiDeg: 0 };
+let dayState = { t:0 };
 let tweenStarted = false;
+const duration = 60000;
 
 // for terrain
 const SQUARE_SIZE = 2000; // meters
@@ -334,32 +331,129 @@ function initializeAircraft(scene) {
 /**
  * Updates the sun's position over time to simulate a moving sky.
  */
+// function updateSky() {
+//     if (DEBUG) {
+//         sunState.phiDeg = sunAngle;
+//     } else {
+//         if (!tweenStarted) {
+//             new TWEEN.Tween(sunState)
+//                 .to({ phiDeg: 360 }, 60000)
+//                 .onUpdate(() => {})
+//                 .repeat(Infinity)
+//                 .start();
+//             tweenStarted = true;
+//         }
+//         TWEEN.update();
+//     }
+//     const theta = THREE.MathUtils.degToRad(180);
+//     const phi = THREE.MathUtils.degToRad(180 - sunState.phiDeg);
+//     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+//     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
+//     SKY.userData.sunLight.position.copy(sunPosition);
+//     SKY.userData.sunLight.lookAt(0, 0, 0);
+//     SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
+//     SKY.userData.moonLight.position.copy(sunPosition);
+//     SKY.userData.moonLight.position.multiplyScalar(-1);
+//     SKY.userData.moonLight.lookAt(0, 0, 0);
+//     SKY.userData.moonLight.intensity = Math.max(0, -Math.cos(phi));
+// }
+
+/**
+ * Updates the sun's position over time to simulate a moving sky.
+ */
 function updateSky() {
+    const t = updateTimeCycle();
+    const { phi, sunIntensity, moonIntensity } = updateSunAndMoonPositions(t);
+    const { sunColor, skyColor } = updateSkyColors(t);
+    updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor);
+}
+
+/**
+ * Updates time and tween cycle for day
+ * */
+function updateTimeCycle() {
     if (DEBUG) {
-        sunState.phiDeg = sunAngle;
-    } else {
-        if (!tweenStarted) {
-            new TWEEN.Tween(sunState)
-                .to({ phiDeg: 360 }, 60000)
-                .onUpdate(() => {})
-                .repeat(Infinity)
-                .start();
-            tweenStarted = true;
-        }
-        TWEEN.update();
+        return (dayState.t = sunAngle / 360);
     }
+    if (!tweenStarted) {
+        new TWEEN.Tween(dayState)
+            .to({ t: 1 }, duration)
+            .easing(TWEEN.Easing.Linear.None)
+            .onComplete(() => (dayState.t = 0))
+            .repeat(Infinity)
+            .start();
+        tweenStarted = true;
+    }
+    TWEEN.update();
+    return dayState.t;
+}
+
+/**
+ * Updates sun and moon positions based on time
+ * */
+function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
-    const phi = THREE.MathUtils.degToRad(180 - sunState.phiDeg);
+    const phi = THREE.MathUtils.degToRad(180 - t * 360);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
     SKY.userData.sunLight.position.copy(sunPosition);
     SKY.userData.sunLight.lookAt(0, 0, 0);
-    SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
-    SKY.userData.moonLight.position.copy(sunPosition);
-    SKY.userData.moonLight.position.multiplyScalar(-1);
+    SKY.userData.moonLight.position.copy(sunPosition).multiplyScalar(-1);
     SKY.userData.moonLight.lookAt(0, 0, 0);
-    SKY.userData.moonLight.intensity = Math.max(0, -Math.cos(phi));
+    const sunIntensity = Math.max(0, Math.cos(phi));
+    const moonIntensity = Math.max(0, -Math.cos(phi));
+    return { phi, sunIntensity, moonIntensity, sunPosition };
 }
+
+/**
+ * Updates sun and sky colors based on time
+ * */
+function updateSkyColors(t) {
+    const midnight = new THREE.Color(0x112244);
+    const sunrise = new THREE.Color(0xffb366);
+    const noon = new THREE.Color(0xffffff);
+    const sunset = new THREE.Color(0xff8844);
+    const nightSky = new THREE.Color(0x000011);
+    const daySky = new THREE.Color(0x87ceeb);
+    let sunColor = new THREE.Color();
+    let skyColor = new THREE.Color();
+    if (t < 0.25) {
+        // Midnight → Sunrise
+        sunColor.lerpColors(midnight, sunrise, t / 0.25);
+        skyColor.lerpColors(nightSky, daySky, t / 0.25);
+    } else if (t < 0.5) {
+        // Sunrise → Noon
+        sunColor.lerpColors(sunrise, noon, (t - 0.25) / 0.25);
+        skyColor.lerpColors(daySky, noon, (t - 0.25) / 0.25);
+    } else if (t < 0.75) {
+        // Noon → Sunset
+        sunColor.lerpColors(noon, sunset, (t - 0.5) / 0.25);
+        skyColor.lerpColors(daySky, sunset, (t - 0.5) / 0.25);
+    } else {
+        // Sunset → Midnight
+        sunColor.lerpColors(sunset, midnight, (t - 0.75) / 0.25);
+        skyColor.lerpColors(sunset, nightSky, (t - 0.75) / 0.25);
+    }
+    return { sunColor, skyColor };
+}
+
+/**
+ *
+ * **/
+function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
+    const sunLight = SKY.userData.sunLight;
+    const moonLight = SKY.userData.moonLight;
+    const ambient = SCENE.children.find(obj => obj.isAmbientLight);
+    sunLight.intensity = THREE.MathUtils.lerp(0.05, 1.5, sunIntensity);
+    moonLight.intensity = THREE.MathUtils.lerp(0.05, 0.3, moonIntensity);
+    ambient && (ambient.intensity = THREE.MathUtils.lerp(0.05, 0.5, sunIntensity));
+    sunLight.color.copy(sunColor);
+    moonLight.color.copy(new THREE.Color(0xB0C4DE)); //soft blue
+    ambient && ambient.color.copy(sunColor.clone().multiplyScalar(0.5));
+    SCENE.background = skyColor;
+    SCENE.fog.color.copy(skyColor.clone().lerp(new THREE.Color(0x111111),0.3));
+}
+
 
 /**
  * Checks the aircraft's position and generates new terrain chunks as needed.
@@ -370,13 +464,6 @@ function checkTerrainUpdate() {
     const chunkY = Math.floor(planePosition.z / SQUARE_SIZE);
     generateNeighboringChunks(chunkX, chunkY);
 }
-
-// /**
-//  * Update Fog Color based on sky
-//  * */
-// function updateFogColor() {
-//
-// }
 
 
 
