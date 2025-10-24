@@ -28,6 +28,14 @@ const USE_ORBIT_CONTROLS = true;
 const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
+// for airplane
+let AIRCRAFT;
+
+// for sky
+let sunAngle = 180;
+let sunState = { phiDeg: 0 };
+let tweenStarted = false;
+
 // for terrain
 const SQUARE_SIZE = 2000; // meters
 const chunkHeights = {};
@@ -37,14 +45,6 @@ const neighborDirections = [
     [1, 1], [-1, -1],
     [1, -1], [-1, 1]
 ];
-
-// for airplane
-let AIRCRAFT;
-
-// for sky
-let sunAngle = 180;
-let sunState = { phiDeg: 0 };
-let tweenStarted = false;
 
 // textures and materials
 const terrainTexture = new THREE.TextureLoader().load(new URL('https://cdn.architextures.org/textures/23/10/grass-none-e6q3dt.jpg', import.meta.url).href);
@@ -223,6 +223,21 @@ function initializeOrbitControls(camera, renderer) {
     controls.enabled = USE_ORBIT_CONTROLS;
     return controls;
 }
+
+/**
+ * Initializes FlyControls for camera interaction using keyboard input.
+ * @param {THREE.Camera} camera - The camera to control.
+ * @param {THREE.WebGLRenderer} renderer - Renderer used to attach event listeners.
+ * @returns {FlyControls}
+ */
+// function initializeFlyControls(camera, renderer) {
+//     const controls = new FlyControls(camera, renderer.domElement);
+//     controls.movementSpeed = 100;
+// controls.movementSpeed = 150;
+// controls.rollSpeed = Math.PI / 24;
+// controls.dragToLook = true;
+//     return controls;
+// }
 
 /**
  * Adds ambient light and directional sunlight to the scene.
