@@ -40,7 +40,7 @@ let tweenStarted = false;
 const SQUARE_SIZE = 2000; // meters
 const chunkHeights = {};
 const neighborDirections = [
-    [0, 0], [1, 0], [-1, 0],
+    [1, 0], [-1, 0],
     [0, 1], [0, -1],
     [1, 1], [-1, -1],
     [1, -1], [-1, 1]
@@ -256,11 +256,22 @@ function initializeLights(scene, sunPosition, sky) {
     sunDirectionalLight.shadow.mapSize.width = 2048;
     sunDirectionalLight.shadow.mapSize.height = 2048;
     sunDirectionalLight.shadow.camera.near = 0.5;
-    sunDirectionalLight.shadow.camera.far = 1000;
+    sunDirectionalLight.shadow.camera.far = 5000;
     sunDirectionalLight.position.copy(sunPosition);
     scene.add(sunDirectionalLight);
 
+    const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.2);
+    moonDirectionalLight.castShadow = true;
+    moonDirectionalLight.shadow.mapSize.width = 2048;
+    moonDirectionalLight.shadow.mapSize.height = 2048;
+    moonDirectionalLight.shadow.camera.near = 0.5;
+    moonDirectionalLight.shadow.camera.far = 5000;
+    moonDirectionalLight.position.copy(sunPosition);
+    moonDirectionalLight.position.multiplyScalar(-1);
+    scene.add(moonDirectionalLight);
+
     sky.userData.sunLight = sunDirectionalLight;
+    sky.userData.moonLight = moonDirectionalLight;
     return sunDirectionalLight;
 }
 
@@ -344,6 +355,10 @@ function updateSky() {
     SKY.userData.sunLight.position.copy(sunPosition);
     SKY.userData.sunLight.lookAt(0, 0, 0);
     SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
+    SKY.userData.moonLight.position.copy(sunPosition);
+    SKY.userData.moonLight.position.multiplyScalar(-1);
+    SKY.userData.moonLight.lookAt(0, 0, 0);
+    SKY.userData.moonLight.intensity = Math.max(0, -Math.cos(phi));
 }
 
 /**
