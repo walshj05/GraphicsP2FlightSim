@@ -268,6 +268,9 @@ function initializeSky(scene) {
 
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
+    const fog = new THREE.Fog(0x000000, 1, 450000);
+    scene.fog = fog;
+    scene.add(fog);
     return { sunPosition, sky };
 }
 
@@ -296,8 +299,7 @@ function initializeAircraft(scene) {
             });
             object.scale.set(0.01, 0.01, 0.01);
             object.rotation.x = -Math.PI / 2;
-            object.position.y = 5000;
-            object.position.set(0, -1, 0);
+            object.position.set(0, 3, 0);
             AIRCRAFT = object;
             AIRCRAFT.castShadow = true;
             if (!DEBUG) { scene.add(object) }
