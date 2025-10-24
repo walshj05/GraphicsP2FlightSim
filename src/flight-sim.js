@@ -21,12 +21,15 @@ import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight }
 // const MAX_SPEED = 55; // m/s
 // const MAX_ALTITUDE = 4200; // meters
 // const GRAVITY = 9.81; // m/s^2
-const SQUARE_SIZE = 2000; // meters
+
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
 const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
+
+// for terrain
+const SQUARE_SIZE = 2000; // meters
 const chunkHeights = {};
 const neighborDirections = [
     [0, 0], [1, 0], [-1, 0],
@@ -34,7 +37,9 @@ const neighborDirections = [
     [1, 1], [-1, -1],
     [1, -1], [-1, 1]
 ];
-let AIRCRAFT; // for airplane
+
+// for airplane
+let AIRCRAFT;
 
 // for sky
 let sunAngle = 180;
@@ -184,9 +189,9 @@ function initScene() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
     const container = document.getElementById('container');
     container.appendChild(renderer.domElement);
-
     const controls = initializeOrbitControls(camera, renderer);
     const aircraft = initializeAircraft(scene)
 
@@ -356,6 +361,7 @@ function animate() {
     }
     updateSky();
     CONTROLLER.update();
+    RENDERER.castShadow = true;
     RENDERER.render(SCENE, CAMERA);
 }
 animate();
