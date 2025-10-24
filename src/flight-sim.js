@@ -268,9 +268,7 @@ function initializeSky(scene) {
 
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    const fog = new THREE.Fog(0x000000, 1, 450000);
-    scene.fog = fog;
-    scene.add(fog);
+    scene.fog = new THREE.Fog(0xaaaaaa, 50, 5000);
     return { sunPosition, sky };
 }
 
