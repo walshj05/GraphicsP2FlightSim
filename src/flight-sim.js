@@ -10,8 +10,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 
 // const WING_SPAN = 11; // meters
@@ -21,11 +20,13 @@ import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight }
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = false;
+const DEBUG = true;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
 // for airplane
 let AIRCRAFT;
+let MIXER; // Animation mixer for GLB animations
+let CLOCK = new THREE.Clock(); // Clock for animation timing
 
 // for sky
 let sunAngle = 180;
@@ -197,13 +198,12 @@ function initScene() {
     controls.update();
 
     const sunDirectionalLight = initializeLights(scene, sunPosition, sky);
-    if (DEBUG) {
-        const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
-        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff00 });
-        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        scene.add(sphere);
-        sunDirectionalLight.target = sphere;
-    }
+    // const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
+    // const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff00 });
+    // const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    // scene.add(sphere);
+    // sunDirectionalLight.target = sphere;
+
 
     return [scene, camera, renderer, controls, sky, aircraft];
 }
@@ -232,6 +232,7 @@ function initializeOrbitControls(camera, renderer) {
 //     controls.movementSpeed = 100;
 // controls.movementSpeed = 150;
 // controls.rollSpeed = Math.PI / 24;
+
 // controls.dragToLook = true;
 //     return controls;
 // }
@@ -284,14 +285,12 @@ function initializeSky(scene) {
     sky.material.uniforms.rayleigh.value = 1.2;
     sky.material.uniforms.mieCoefficient.value = 0.00005;
     sky.material.uniforms.mieDirectionalG.value = 0.02;
-
     const phi = THREE.MathUtils.degToRad(270);
     const theta = THREE.MathUtils.degToRad(330);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.Fog('white', 1, 4000);
+    scene.fog = new THREE.Fog('white', 1, 3500);
     return { sunPosition, sky };
 }
 
@@ -301,31 +300,24 @@ function initializeSky(scene) {
  * @return aircraft
  * */
 function initializeAircraft(scene) {
-    const mtlPath = new URL('./models/11804_Airplane_v2_l2.mtl', import.meta.url).href;
-    const objPath = new URL('./models/11804_Airplane_v2_l2.obj', import.meta.url).href;
-    const texPath = new URL('./images/11804_Airplane_diff.jpg', import.meta.url).href;
 
-    const mtlLoader = new MTLLoader();
-    mtlLoader.load(mtlPath, (materials) => {
-        materials.preload();
-        const objLoader = new OBJLoader();
-        objLoader.setMaterials(materials);
-        objLoader.load(objPath, (object) => {
-            const texture = new THREE.TextureLoader().load(texPath);
-            object.traverse((child) => {
-                if (child.isMesh) {
-                    child.material.map = texture;
-                    child.material.needsUpdate = true;
-                }
+    const glbPath = new URL('./models/cargo_aircraft.glb', import.meta.url).href;
+    const glbLoader = new GLTFLoader();
+    glbLoader.load(glbPath, (gltf) => {
+        const object = gltf.scene;
+        object.scale.set(0.01, 0.01, 0.01);
+        object.position.set(0, 3, 0);
+        AIRCRAFT = object;
+        AIRCRAFT.castShadow = true;
+        if (gltf.animations && gltf.animations.length > 0) {
+            MIXER = new THREE.AnimationMixer(object);
+            gltf.animations.forEach((clip) => {
+                const action = MIXER.clipAction(clip);
+                action.play();
             });
-            object.scale.set(0.01, 0.01, 0.01);
-            object.rotation.x = -Math.PI / 2;
-            object.position.set(0, 3, 0);
-            AIRCRAFT = object;
-            AIRCRAFT.castShadow = true;
-            if (!DEBUG) { scene.add(object) }
-        });
-    });
+        }
+        scene.add(object);
+    })
 }
 
 
@@ -444,6 +436,11 @@ function checkTerrainUpdate() {
  */
 function animate() {
     requestAnimationFrame(animate);
+    const delta = CLOCK.getDelta();
+    // Update animation mixer
+    if (MIXER) {
+        MIXER.update(delta);
+    }
     if (AIRCRAFT) {
         checkTerrainUpdate();
     }
