@@ -21,7 +21,7 @@ import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight }
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = true;
+const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
 // for airplane
@@ -221,12 +221,12 @@ function initializeOrbitControls(camera, renderer) {
     return controls;
 }
 
-/**
- * Initializes FlyControls for camera interaction using keyboard input.
- * @param {THREE.Camera} camera - The camera to control.
- * @param {THREE.WebGLRenderer} renderer - Renderer used to attach event listeners.
- * @returns {FlyControls}
- */
+// /**
+//  * Initializes FlyControls for camera interaction using keyboard input.
+//  * @param {THREE.Camera} camera - The camera to control.
+//  * @param {THREE.WebGLRenderer} renderer - Renderer used to attach event listeners.
+//  * @returns {FlyControls}
+//  */
 // function initializeFlyControls(camera, renderer) {
 //     const controls = new FlyControls(camera, renderer.domElement);
 //     controls.movementSpeed = 100;
@@ -291,7 +291,7 @@ function initializeSky(scene) {
 
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.Fog(0xaaaaaa, 50, 5000);
+    scene.fog = new THREE.Fog(0xaaaaaa, 1, 4000);
     return { sunPosition, sky };
 }
 
