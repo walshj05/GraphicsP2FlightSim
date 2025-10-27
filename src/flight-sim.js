@@ -291,7 +291,7 @@ function initializeSky(scene) {
 
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.Fog(0xaaaaaa, 1, 4000);
+    scene.fog = new THREE.Fog('white', 1, 4000);
     return { sunPosition, sky };
 }
 
@@ -328,35 +328,6 @@ function initializeAircraft(scene) {
     });
 }
 
-/**
- * Updates the sun's position over time to simulate a moving sky.
- */
-// function updateSky() {
-//     if (DEBUG) {
-//         sunState.phiDeg = sunAngle;
-//     } else {
-//         if (!tweenStarted) {
-//             new TWEEN.Tween(sunState)
-//                 .to({ phiDeg: 360 }, 60000)
-//                 .onUpdate(() => {})
-//                 .repeat(Infinity)
-//                 .start();
-//             tweenStarted = true;
-//         }
-//         TWEEN.update();
-//     }
-//     const theta = THREE.MathUtils.degToRad(180);
-//     const phi = THREE.MathUtils.degToRad(180 - sunState.phiDeg);
-//     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-//     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
-//     SKY.userData.sunLight.position.copy(sunPosition);
-//     SKY.userData.sunLight.lookAt(0, 0, 0);
-//     SKY.userData.sunLight.intensity = Math.max(0, Math.cos(phi));
-//     SKY.userData.moonLight.position.copy(sunPosition);
-//     SKY.userData.moonLight.position.multiplyScalar(-1);
-//     SKY.userData.moonLight.lookAt(0, 0, 0);
-//     SKY.userData.moonLight.intensity = Math.max(0, -Math.cos(phi));
-// }
 
 /**
  * Updates the sun's position over time to simulate a moving sky.
