@@ -20,7 +20,7 @@ import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight }
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = true;
+const DEBUG = false;
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
 // for airplane
@@ -184,15 +184,8 @@ function initScene() {
     camera.lookAt(0, 200, 0);
     controls.update();
 
-    const sunDirectionalLight = initializeLights(scene, sunPosition, sky);
+    initializeLights(scene, sunPosition, sky);
 
-    if (DEBUG) {
-        const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
-        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff00 });
-        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        scene.add(sphere);
-        sunDirectionalLight.target = sphere;
-    }
     return [scene, camera, renderer, controls, sky, aircraft];
 }
 
