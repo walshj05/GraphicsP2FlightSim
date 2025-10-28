@@ -139,16 +139,12 @@ function addTerrainMesh(x, y) {
 function addHelpers() {
     const axesHelper = new THREE.AxesHelper(500);
     SCENE.add(axesHelper);
-
     const gridHelper = new THREE.GridHelper(10000, 100, 0x888888, 0x444444);
     SCENE.add(gridHelper);
-
     const lightHelper = new THREE.DirectionalLightHelper(SKY.userData.sunLight, 5);
     SCENE.add(lightHelper);
-
     const controlsGroup = document.getElementById('controls') || document.createElement('div');
     controlsGroup.id = 'controls';
-
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '0';
@@ -156,11 +152,9 @@ function addHelpers() {
     slider.value = '90';
     slider.id = 'sunSlider';
     controlsGroup.appendChild(slider);
-
     if (!document.getElementById('controls')) {
         document.body.appendChild(controlsGroup);
     }
-
     slider.addEventListener('input', (event) => {
         sunAngle = parseFloat(event.target.value);
     })
@@ -176,35 +170,29 @@ if (DEBUG) {
  */
 function initScene() {
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        10000
-    );
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
 
-    const { sunPosition, sky } = initializeSky(scene);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const {sunPosition, sky} = initializeSky(scene);
+    const renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     const container = document.getElementById('container');
     container.appendChild(renderer.domElement);
     const controls = initializeOrbitControls(camera, renderer);
-    const aircraft = initializeAircraft(scene)
-
-    camera.position.set(4, 1, 9);
-    camera.lookAt(0, 0, 0);
+    const aircraft = initializeAircraft(scene);
+    camera.position.set(0, 210, -15);
+    camera.lookAt(0, 200, 0);
     controls.update();
 
     const sunDirectionalLight = initializeLights(scene, sunPosition, sky);
-    // const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
-    // const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff00 });
-    // const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    // scene.add(sphere);
-    // sunDirectionalLight.target = sphere;
 
-
+    if (DEBUG) {
+        const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
+        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff00 });
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        scene.add(sphere);
+        sunDirectionalLight.target = sphere;
+    }
     return [scene, camera, renderer, controls, sky, aircraft];
 }
 
@@ -300,15 +288,24 @@ function initializeSky(scene) {
  * @return aircraft
  * */
 function initializeAircraft(scene) {
-
     const glbPath = new URL('./models/cargo_aircraft.glb', import.meta.url).href;
     const glbLoader = new GLTFLoader();
+
     glbLoader.load(glbPath, (gltf) => {
         const object = gltf.scene;
-        object.scale.set(0.01, 0.01, 0.01);
-        object.position.set(0, 3, 0);
         AIRCRAFT = object;
         AIRCRAFT.castShadow = true;
+        object.position.set(0, 200, 0);
+
+        //scaling the whole model to 11 meters
+        const box = new THREE.Box3().setFromObject(object);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const realWingspan = 11;
+        const scaleFactor = realWingspan / size.x;
+        object.scale.setScalar(scaleFactor);
+
+
         if (gltf.animations && gltf.animations.length > 0) {
             MIXER = new THREE.AnimationMixer(object);
             gltf.animations.forEach((clip) => {
@@ -437,13 +434,17 @@ function checkTerrainUpdate() {
 function animate() {
     requestAnimationFrame(animate);
     const delta = CLOCK.getDelta();
-    // Update animation mixer
     if (MIXER) {
         MIXER.update(delta);
     }
     if (AIRCRAFT) {
         checkTerrainUpdate();
+        if(USE_ORBIT_CONTROLS) {
+            CONTROLLER.target.copy(AIRCRAFT.position);
+        }
     }
+
+
     updateSky();
     CONTROLLER.update();
     RENDERER.castShadow = true;
