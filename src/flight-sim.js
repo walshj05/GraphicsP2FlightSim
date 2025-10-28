@@ -180,7 +180,7 @@ function initScene() {
     container.appendChild(renderer.domElement);
     const controls = initializeOrbitControls(camera, renderer);
     const aircraft = initializeAircraft(scene);
-    camera.position.set(0, 210, -15);
+    camera.position.set(0, 220, -30);
     camera.lookAt(0, 200, 0);
     controls.update();
 
@@ -294,7 +294,7 @@ function initializeAircraft(scene) {
         const box = new THREE.Box3().setFromObject(object);
         const size = new THREE.Vector3();
         box.getSize(size);
-        const realWingspan = 11;
+        const realWingspan = 52;
         const scaleFactor = realWingspan / size.x;
         object.scale.setScalar(scaleFactor);
 
