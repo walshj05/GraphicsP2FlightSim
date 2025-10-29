@@ -18,6 +18,32 @@ import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight }
 // const MAX_ALTITUDE = 4200; // meters
 // const GRAVITY = 9.81; // m/s^2
 
+// for shadows
+const SHADOW_MAP_SIZE = 2048;
+const SHADOW_CAMERA_NEAR = 0.5;
+const SHADOW_CAMERA_FAR = 5000;
+
+// for sky
+let sunAngle = 180;
+let dayState = { t:0 };
+let tweenStarted = false;
+const duration = 60000;
+const skyScale = 450000;
+const SUNSETTINGS = {
+    turbidity: 10,
+    rayleigh: 1.2,
+    mieCoefficient: 0.00005,
+    mieDirectionalG: 0.02,
+    inclination: 0.49, // elevation / inclination
+    azimuth: 0.25 // Facing front,
+};
+const skyInitialPhi = 270;
+const skyInitialTheta = 180;
+const fogFar = 3500;
+const fiftSecondInterval = 0.25;
+const thirtySecondInterval = 0.50;
+const fortFiveSecondInterval = 0.75;
+
 //for scene 
 const USE_ORBIT_CONTROLS = true;
 const DEBUG = false;
@@ -28,15 +54,10 @@ let AIRCRAFT;
 let MIXER; // Animation mixer for GLB animations
 let CLOCK = new THREE.Clock(); // Clock for animation timing
 
-// for sky
-let sunAngle = 180;
-let dayState = { t:0 };
-let tweenStarted = false;
-const duration = 60000;
-
 // for terrain
 const SQUARE_SIZE = 2000; // meters
 const chunkHeights = {};
+const terrainYPosition = -100;
 const neighborDirections = [
     [1, 0], [-1, 0],
     [0, 1], [0, -1],
@@ -123,7 +144,7 @@ function addTerrainMesh(x, y) {
     geometry.computeVertexNormals();
     mesh.rotation.x = -Math.PI / 2;
     mesh.rotation.z = Math.PI; // Correct orientation
-    mesh.position.set(x * SQUARE_SIZE, -100, y * SQUARE_SIZE);
+    mesh.position.set(x * SQUARE_SIZE, terrainYPosition, y * SQUARE_SIZE);
 
     mesh.receiveShadow = true;
     mesh.castShadow = true;
@@ -232,19 +253,19 @@ function initializeLights(scene, sunPosition, sky) {
 
     const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
     sunDirectionalLight.castShadow = true;
-    sunDirectionalLight.shadow.mapSize.width = 2048;
-    sunDirectionalLight.shadow.mapSize.height = 2048;
-    sunDirectionalLight.shadow.camera.near = 0.5;
-    sunDirectionalLight.shadow.camera.far = 5000;
+    sunDirectionalLight.shadow.mapSize.width = SHADOW_MAP_SIZE;
+    sunDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
+    sunDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
+    sunDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
     sunDirectionalLight.position.copy(sunPosition);
     scene.add(sunDirectionalLight);
 
     const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.2);
     moonDirectionalLight.castShadow = true;
-    moonDirectionalLight.shadow.mapSize.width = 2048;
-    moonDirectionalLight.shadow.mapSize.height = 2048;
-    moonDirectionalLight.shadow.camera.near = 0.5;
-    moonDirectionalLight.shadow.camera.far = 5000;
+    moonDirectionalLight.shadow.mapSize.width = SHADOW_MAP_SIZE;
+    moonDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
+    moonDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
+    moonDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
     moonDirectionalLight.position.copy(sunPosition);
     moonDirectionalLight.position.multiplyScalar(-1);
     scene.add(moonDirectionalLight);
@@ -261,17 +282,17 @@ function initializeLights(scene, sunPosition, sky) {
  */
 function initializeSky(scene) {
     const sky = new Sky();
-    sky.scale.setScalar(450000);
-    sky.material.uniforms.turbidity.value = 10;
-    sky.material.uniforms.rayleigh.value = 1.2;
-    sky.material.uniforms.mieCoefficient.value = 0.00005;
-    sky.material.uniforms.mieDirectionalG.value = 0.02;
-    const phi = THREE.MathUtils.degToRad(270);
-    const theta = THREE.MathUtils.degToRad(330);
+    sky.scale.setScalar(skyScale);
+    sky.material.uniforms.turbidity.value = SUNSETTINGS.turbidity;
+    sky.material.uniforms.rayleigh.value = SUNSETTINGS.rayleigh;
+    sky.material.uniforms.mieCoefficient.value = SUNSETTINGS.mieCoefficient;
+    sky.material.uniforms.mieDirectionalG.value = SUNSETTINGS.mieDirectionalG;
+    const phi = THREE.MathUtils.degToRad(skyInitialPhi);
+    const theta = THREE.MathUtils.degToRad(skyInitialTheta);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.Fog('white', 1, 3500);
+    scene.fog = new THREE.Fog('white', 1, fogFar);
     return { sunPosition, sky };
 }
 
@@ -370,22 +391,22 @@ function updateSkyColors(t) {
     const daySky = new THREE.Color(0x87ceeb);
     let sunColor = new THREE.Color();
     let skyColor = new THREE.Color();
-    if (t < 0.25) {
+    if (t < fiftSecondInterval) {
         // Midnight → Sunrise
-        sunColor.lerpColors(midnight, sunrise, t / 0.25);
-        skyColor.lerpColors(nightSky, daySky, t / 0.25);
-    } else if (t < 0.5) {
+        sunColor.lerpColors(midnight, sunrise, t / fiftSecondInterval);
+        skyColor.lerpColors(nightSky, daySky, t / fiftSecondInterval);
+    } else if (t < thirtySecondInterval) {
         // Sunrise → Noon
-        sunColor.lerpColors(sunrise, noon, (t - 0.25) / 0.25);
-        skyColor.lerpColors(daySky, noon, (t - 0.25) / 0.25);
-    } else if (t < 0.75) {
+        sunColor.lerpColors(sunrise, noon, (t - fiftSecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(daySky, noon, (t - fiftSecondInterval) / fiftSecondInterval);
+    } else if (t < fortFiveSecondInterval) {
         // Noon → Sunset
-        sunColor.lerpColors(noon, sunset, (t - 0.5) / 0.25);
-        skyColor.lerpColors(daySky, sunset, (t - 0.5) / 0.25);
+        sunColor.lerpColors(noon, sunset, (t - thirtySecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(daySky, sunset, (t - thirtySecondInterval) / fiftSecondInterval);
     } else {
         // Sunset → Midnight
-        sunColor.lerpColors(sunset, midnight, (t - 0.75) / 0.25);
-        skyColor.lerpColors(sunset, nightSky, (t - 0.75) / 0.25);
+        sunColor.lerpColors(sunset, midnight, (t - fortFiveSecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(sunset, nightSky, (t - fortFiveSecondInterval) / fiftSecondInterval);
     }
     return { sunColor, skyColor };
 }
