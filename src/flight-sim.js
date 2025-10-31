@@ -230,22 +230,6 @@ function initializeOrbitControls(camera, renderer) {
     return controls;
 }
 
-// /**
-//  * Initializes FlyControls for camera interaction using keyboard input.
-//  * @param {THREE.Camera} camera - The camera to control.
-//  * @param {THREE.WebGLRenderer} renderer - Renderer used to attach event listeners.
-//  * @returns {FlyControls}
-//  */
-// function initializeFlyControls(camera, renderer) {
-//     const controls = new FlyControls(camera, renderer.domElement);
-//     controls.movementSpeed = 100;
-// controls.movementSpeed = 150;
-// controls.rollSpeed = Math.PI / 24;
-
-// controls.dragToLook = true;
-//     return controls;
-// }
-
 /**
  * Adds ambient light and directional sunlight to the scene.
  * Links the sun to the sky system for dynamic updates.
@@ -325,8 +309,6 @@ function initializeAircraft(scene) {
         const realWingspan = 52;
         const scaleFactor = realWingspan / size.x;
         object.scale.setScalar(scaleFactor);
-
-
         if (gltf.animations && gltf.animations.length > 0) {
             MIXER = new THREE.AnimationMixer(object);
             gltf.animations.forEach((clip) => {
@@ -482,8 +464,6 @@ function animate() {
             CONTROLLER.target.copy(AIRCRAFT.position);
         }
     }
-
-
     updateSky();
     CONTROLLER.update();
     RENDERER.castShadow = true;
