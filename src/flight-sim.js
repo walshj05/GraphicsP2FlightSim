@@ -13,10 +13,16 @@ import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 
-// const WING_SPAN = 11; // meters
-// const MAX_SPEED = 55; // m/s
-// const MAX_ALTITUDE = 4200; // meters
-// const GRAVITY = 9.81; // m/s^2
+// Physics constants
+const WING_SPAN = 11; // meters
+const MAX_SPEED = 55; // m/s
+const MAX_ALTITUDE = 4200; // meters
+const GRAVITY = 9.81; // m/s^2
+const directionalVector = new THREE.Vector3(-1, 0, 0);
+const angularVelocity = new THREE.Vector3(0, 0, 0);
+const velocity = new THREE.Vector3(0, 0, 0);
+let throttle = 0.5;
+const acceleration = directionalVector.clone().multiplyScalar(throttle * 10);
 
 // for shadows
 const SHADOW_MAP_SIZE = 2048;
@@ -53,6 +59,7 @@ const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 let AIRCRAFT;
 let MIXER; // Animation mixer for GLB animations
 let CLOCK = new THREE.Clock(); // Clock for animation timing
+let deltaTime = 0;
 
 // for terrain
 const SQUARE_SIZE = 2000; // meters
@@ -202,7 +209,7 @@ function initScene() {
     const controls = initializeOrbitControls(camera, renderer);
     const aircraft = initializeAircraft(scene);
     camera.position.set(0, 220, -30);
-    camera.lookAt(0, 200, 0);
+    camera.lookAt(camera.position.x, camera.position.y, camera.position.z + 100);
     controls.update();
 
     initializeLights(scene, sunPosition, sky);
@@ -439,7 +446,22 @@ function checkTerrainUpdate() {
     generateNeighboringChunks(chunkX, chunkY);
 }
 
+function updateCameraPosition() {
+    const [x, y, z] = AIRCRAFT.position;
+    CAMERA.position.set(x, y + 10, z - 20);
+    CAMERA.lookAt(x, y, z);
+}
 
+function updateAircraft(delta) {
+    // Update aircraft position and orientation based on physics
+    // Placeholder logic for demonstration purposes
+    AIRCRAFT.position.z += 10; 
+
+    AIRCRAFT.rotation.x = angularVelocity.x * (1 - 3 * delta);
+    AIRCRAFT.rotation.y = angularVelocity.y * (1 - 3 * delta);
+    AIRCRAFT.rotation.z = angularVelocity.z * (1 - 3 * delta);
+
+}
 
 /**
  * Animation loop: updates sky, orbit controls, and renders each frame.
@@ -448,10 +470,13 @@ function checkTerrainUpdate() {
 function animate() {
     requestAnimationFrame(animate);
     const delta = CLOCK.getDelta();
+    deltaTime = delta;
     if (MIXER) {
         MIXER.update(delta);
     }
     if (AIRCRAFT) {
+        updateAircraft(delta);
+        updateCameraPosition();
         checkTerrainUpdate();
         if(USE_ORBIT_CONTROLS) {
             CONTROLLER.target.copy(AIRCRAFT.position);
@@ -465,6 +490,57 @@ function animate() {
     RENDERER.render(SCENE, CAMERA);
 }
 animate();
+
+function onWindowResize() {
+    CAMERA.aspect = window.innerWidth / window.innerHeight;
+    CAMERA.updateProjectionMatrix();
+    RENDERER.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener('resize', onWindowResize, false);
+
+function onDocumentKeyDown(event) {
+    const keyCode = event.which;
+    // Add key controls for aircraft here
+    switch (keyCode) {
+    case 87: // W
+        // Pitch down
+        angularVelocity.x += 2 * deltaTime;
+        break;
+    case 83: // S
+        // Pitch up
+        angularVelocity.x -= 2 * deltaTime;
+        break;
+    case 65: // A
+        // Roll left
+        angularVelocity.z += 2 * deltaTime;
+        break;
+    case 68: // D
+        // Roll right
+        angularVelocity.z -= 2 * deltaTime;
+        break;
+    case 81: // Q
+        // Yaw left
+        angularVelocity.y -= 2 * deltaTime;
+        break;
+    case 69: // E
+        // Yaw right
+        angularVelocity.y += 2 * deltaTime;
+        break;
+    case 32: // Space
+        // Throttle large fall off
+        throttle = Math.max(0, throttle - deltaTime * 3);
+        break;
+    case 16: // Shift
+        // Throttle increases
+        throttle = Math.min(1, throttle + deltaTime);
+        break;
+    case 17: // Ctrl
+        // Throttle lessens
+        throttle = Math.max(0, throttle - deltaTime);
+        break;
+    }
+}
+document.addEventListener('keydown', onDocumentKeyDown, false);
 
 // /**
 //  * Reset the scene back to default
