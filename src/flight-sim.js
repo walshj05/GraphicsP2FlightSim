@@ -18,11 +18,16 @@ const WING_SPAN = 11; // meters
 const MAX_SPEED = 55; // m/s
 const MAX_ALTITUDE = 4200; // meters
 const GRAVITY = 9.81; // m/s^2
-const directionalVector = new THREE.Vector3(-1, 0, 0);
-const angularVelocity = new THREE.Vector3(0, 0, 0);
-const velocity = new THREE.Vector3(0, 0, 0);
-let throttle = 0.5;
-const acceleration = directionalVector.clone().multiplyScalar(throttle * 10);
+const ANGL_ACCELERATION_RATE = 2.0;        // rad/s²
+const ANG_DAMP_RATE = 3.0;    // per second
+const THRUST_SCALE = 10.0;    // acceleration = forward * throttle * 10
+const LIFT_FACTOR = 0.003;
+const DRAG_COEFFICIENT = 0.01;  // drag per second
+
+// --- State ---
+let velocity = new THREE.Vector3(-20, 0, 0);
+let angularVelocity = new THREE.Vector3(0, 0, 0); // pitch (x), yaw (y), roll (z)
+let throttle = 0.5; // range [0,1]
 
 // for shadows
 const SHADOW_MAP_SIZE = 2048;
@@ -59,7 +64,6 @@ const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 let AIRCRAFT;
 let MIXER; // Animation mixer for GLB animations
 let CLOCK = new THREE.Clock(); // Clock for animation timing
-let deltaTime = 0;
 
 // for terrain
 const SQUARE_SIZE = 2000; // meters
@@ -198,7 +202,7 @@ if (DEBUG) {
  */
 function initScene() {
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+    const camera = new THREE.PerspectiveCamera(120, window.innerWidth / window.innerHeight, 0.1, 10000);
 
     const {sunPosition, sky} = initializeSky(scene);
     const renderer = new THREE.WebGLRenderer({antialias: true});
@@ -300,15 +304,30 @@ function initializeAircraft(scene) {
         const object = gltf.scene;
         AIRCRAFT = object;
         AIRCRAFT.castShadow = true;
-        object.position.set(0, 200, 0);
+        object.children[0].rotation.z = -Math.PI / 2;
 
-        //scaling the whole model to 11 meters
+        // --- Scale first, then set position to be unambiguous ---
         const box = new THREE.Box3().setFromObject(object);
         const size = new THREE.Vector3();
         box.getSize(size);
-        const realWingspan = 52;
-        const scaleFactor = realWingspan / size.x;
+
+        // realWingspan is your target wingspan in world units (you used 52)
+        const scaleFactor = WING_SPAN / size.x;
         object.scale.setScalar(scaleFactor);
+
+        // Now set the world position *after* scaling so position is exactly what you expect
+        object.position.set(0, 200, 0);
+
+        // Align model so its local -X axis points along the initial velocity direction
+        // (we assume your initial velocity variable is set above: velocity = new THREE.Vector3(-20,0,0))
+        if (velocity.length() > 0.0001) {
+            const desiredDir = velocity.clone().normalize();           // world-space direction we want
+            const modelForward = new THREE.Vector3(-1, 0, 0);         // model's forward in local coords (use -X)
+            const quat = new THREE.Quaternion().setFromUnitVectors(modelForward, desiredDir);
+            object.quaternion.copy(quat);
+        }
+
+        // animations (unchanged)
         if (gltf.animations && gltf.animations.length > 0) {
             MIXER = new THREE.AnimationMixer(object);
             gltf.animations.forEach((clip) => {
@@ -316,8 +335,9 @@ function initializeAircraft(scene) {
                 action.play();
             });
         }
+
         scene.add(object);
-    })
+    });
 }
 
 
@@ -428,22 +448,80 @@ function checkTerrainUpdate() {
     generateNeighboringChunks(chunkX, chunkY);
 }
 
-function updateCameraPosition() {
-    const [x, y, z] = AIRCRAFT.position;
-    CAMERA.position.set(x, y + 10, z - 20);
-    CAMERA.lookAt(x, y, z);
+// Update Function
+function updatePlanePhysics(plane, camera, input, deltaTime) {
+    // Input handling (same)
+    if (input.w) angularVelocity.z +=  -ANGL_ACCELERATION_RATE * deltaTime; // pitch up
+    if (input.s) angularVelocity.z += +ANGL_ACCELERATION_RATE * deltaTime; // pitch down
+    if (input.d) angularVelocity.x +=  -ANGL_ACCELERATION_RATE * deltaTime; // roll right
+    if (input.a) angularVelocity.x += ANGL_ACCELERATION_RATE * deltaTime; // roll left
+    if (input.e) angularVelocity.y +=  -ANGL_ACCELERATION_RATE * deltaTime; // yaw right
+    if (input.q) angularVelocity.y += ANGL_ACCELERATION_RATE * deltaTime; // yaw left
+    if (input.Shift) throttle = Math.min(1, throttle + deltaTime);
+    if (input.Control)  throttle = Math.max(0, throttle - deltaTime);
+    if (input[" "]) throttle = Math.max(0, throttle - 3 * deltaTime);
+
+    // Angular damping
+    const damp = Math.max(0, 1 - ANG_DAMP_RATE * deltaTime);
+    angularVelocity.multiplyScalar(damp);
+
+    // --- Forward and up vectors in world space ---
+    // Use local -X as forward because your velocity and intent are -X
+    const forward = new THREE.Vector3(-1, 0, 0).applyQuaternion(plane.quaternion).normalize();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(plane.quaternion).normalize();
+
+    // Compute thrust acceleration along forward (local -X in world space)
+    const acceleration = new THREE.Vector3();
+    acceleration.add(forward.clone().multiplyScalar(throttle * THRUST_SCALE));
+
+    // Gravity (world downward)
+    acceleration.y += -GRAVITY;
+
+    // Compute horizontal (XZ-plane) speed magnitude
+    const horizontalVel = new THREE.Vector3(velocity.x, 0, velocity.z);
+    const horizontalSpeed = horizontalVel.length();
+
+    // Use speed^2 for lift (makes lift increase fast with speed without changing LIFT_FACTOR)
+    const lift = LIFT_FACTOR * horizontalSpeed ** 2;
+    // Apply lift along the plane's *local up* (so pitch affects vertical lift)
+    acceleration.add(up.clone().multiplyScalar(lift));
+
+    // Integrate velocity
+    velocity.addScaledVector(acceleration, deltaTime);
+
+    // Apply drag (frame-rate independent)
+    velocity.multiplyScalar(1 - DRAG_COEFFICIENT * deltaTime);
+
+    // Clamp speed
+    const speed = velocity.length();
+    if (speed > MAX_SPEED) velocity.multiplyScalar(MAX_SPEED / speed);
+
+    // Update position
+    plane.position.addScaledVector(velocity, deltaTime);
+    plane.position.y = Math.min(plane.position.y, MAX_ALTITUDE);
+
+    // Apply rotation from angular velocity (local axis approximation)
+    const deltaEuler = angularVelocity.clone().multiplyScalar(deltaTime);
+    const deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        deltaEuler.x, deltaEuler.y, deltaEuler.z, 'XYZ'
+    ));
+    plane.quaternion.multiply(deltaQuat).normalize();
+
+    // Update camera (follow behind)
+    const cameraDistance = 5;
+    const cameraHeight = 1;
+    const cameraTarget = plane.position.clone();
+    const cameraPos = cameraTarget.clone()
+        .addScaledVector(forward, -cameraDistance)
+        .addScaledVector(up, cameraHeight);
+
+    camera.position.lerp(cameraPos, 0.1); // smooth follow
+    camera.lookAt(cameraTarget);
 }
 
-function updateAircraft(delta) {
-    // Update aircraft position and orientation based on physics
-    // Placeholder logic for demonstration purposes
-    AIRCRAFT.position.z += 10; 
-
-    AIRCRAFT.rotation.x = angularVelocity.x * (1 - 3 * delta);
-    AIRCRAFT.rotation.y = angularVelocity.y * (1 - 3 * delta);
-    AIRCRAFT.rotation.z = angularVelocity.z * (1 - 3 * delta);
-
-}
+const input = {};
+window.addEventListener('keydown', e => {input[e.key] = true;});
+window.addEventListener('keyup', e => {input[e.key] = false;});
 
 /**
  * Animation loop: updates sky, orbit controls, and renders each frame.
@@ -452,13 +530,11 @@ function updateAircraft(delta) {
 function animate() {
     requestAnimationFrame(animate);
     const delta = CLOCK.getDelta();
-    deltaTime = delta;
     if (MIXER) {
         MIXER.update(delta);
     }
     if (AIRCRAFT) {
-        updateAircraft(delta);
-        updateCameraPosition();
+        updatePlanePhysics(AIRCRAFT, CAMERA, input, delta);
         checkTerrainUpdate();
         if(USE_ORBIT_CONTROLS) {
             CONTROLLER.target.copy(AIRCRAFT.position);
@@ -468,6 +544,7 @@ function animate() {
     CONTROLLER.update();
     RENDERER.castShadow = true;
     RENDERER.render(SCENE, CAMERA);
+    CAMERA.updateProjectionMatrix();
 }
 animate();
 
@@ -478,49 +555,6 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize, false);
 
-function onDocumentKeyDown(event) {
-    const keyCode = event.which;
-    // Add key controls for aircraft here
-    switch (keyCode) {
-    case 87: // W
-        // Pitch down
-        angularVelocity.x += 2 * deltaTime;
-        break;
-    case 83: // S
-        // Pitch up
-        angularVelocity.x -= 2 * deltaTime;
-        break;
-    case 65: // A
-        // Roll left
-        angularVelocity.z += 2 * deltaTime;
-        break;
-    case 68: // D
-        // Roll right
-        angularVelocity.z -= 2 * deltaTime;
-        break;
-    case 81: // Q
-        // Yaw left
-        angularVelocity.y -= 2 * deltaTime;
-        break;
-    case 69: // E
-        // Yaw right
-        angularVelocity.y += 2 * deltaTime;
-        break;
-    case 32: // Space
-        // Throttle large fall off
-        throttle = Math.max(0, throttle - deltaTime * 3);
-        break;
-    case 16: // Shift
-        // Throttle increases
-        throttle = Math.min(1, throttle + deltaTime);
-        break;
-    case 17: // Ctrl
-        // Throttle lessens
-        throttle = Math.max(0, throttle - deltaTime);
-        break;
-    }
-}
-document.addEventListener('keydown', onDocumentKeyDown, false);
 
 // /**
 //  * Reset the scene back to default
