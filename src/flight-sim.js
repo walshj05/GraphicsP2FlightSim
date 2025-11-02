@@ -14,7 +14,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 
 // Physics constants
-const WING_SPAN = 11; // meters
+const WING_SPAN = 52; // meters
 const MAX_SPEED = 55; // m/s
 const MAX_ALTITUDE = 4200; // meters
 const GRAVITY = 9.81; // m/s^2
@@ -24,7 +24,7 @@ const THRUST_SCALE = 10.0;    // acceleration = forward * throttle * 10
 const LIFT_FACTOR = 0.003;
 const DRAG_COEFFICIENT = 0.01;  // drag per second
 
-// --- State ---
+// for State
 let velocity = new THREE.Vector3(-20, 0, 0);
 let angularVelocity = new THREE.Vector3(0, 0, 0); // pitch (x), yaw (y), roll (z)
 let throttle = 0.5; // range [0,1]
@@ -58,6 +58,8 @@ const fortFiveSecondInterval = 0.75;
 //for scene 
 const USE_ORBIT_CONTROLS = true;
 const DEBUG = false;
+document.getElementById('reset')?.addEventListener('click', reset);
+window.addEventListener('resize', onWindowResize, false);
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
 // for airplane
@@ -212,7 +214,7 @@ function initScene() {
     container.appendChild(renderer.domElement);
     const controls = initializeOrbitControls(camera, renderer);
     const aircraft = initializeAircraft(scene);
-    camera.position.set(0, 220, -30);
+    camera.position.set(25, 206, 0);
     camera.lookAt(camera.position.x, camera.position.y, camera.position.z + 100);
     controls.update();
 
@@ -336,7 +338,7 @@ function initializeAircraft(scene) {
             });
         }
 
-        scene.add(object);
+        if (!DEBUG) scene.add(object);
     });
 }
 
@@ -396,26 +398,31 @@ function updateSkyColors(t) {
     const sunrise = new THREE.Color(0xffb366);
     const noon = new THREE.Color(0xffffff);
     const sunset = new THREE.Color(0xff8844);
+
     const nightSky = new THREE.Color(0x000011);
+    const noonSky = new THREE.Color(0xadd8e6);
+    const sunsetSky = new THREE.Color(0xff8844);
     const daySky = new THREE.Color(0x87ceeb);
+
     let sunColor = new THREE.Color();
     let skyColor = new THREE.Color();
+
     if (t < fiftSecondInterval) {
-        // Midnight → Sunrise
+        // Midnight (0.0) → Sunrise (0.25)
         sunColor.lerpColors(midnight, sunrise, t / fiftSecondInterval);
         skyColor.lerpColors(nightSky, daySky, t / fiftSecondInterval);
     } else if (t < thirtySecondInterval) {
-        // Sunrise → Noon
+        // Sunrise (0.25) → Noon (0.50)
         sunColor.lerpColors(sunrise, noon, (t - fiftSecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(daySky, noon, (t - fiftSecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(daySky, noonSky, (t - fiftSecondInterval) / fiftSecondInterval);
     } else if (t < fortFiveSecondInterval) {
-        // Noon → Sunset
+        // Noon (0.50) → Sunset (0.75)
         sunColor.lerpColors(noon, sunset, (t - thirtySecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(daySky, sunset, (t - thirtySecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(noonSky, sunsetSky, (t - thirtySecondInterval) / fiftSecondInterval);
     } else {
-        // Sunset → Midnight
+        // Sunset (0.75) → Midnight (1.0)
         sunColor.lerpColors(sunset, midnight, (t - fortFiveSecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(sunset, nightSky, (t - fortFiveSecondInterval) / fiftSecondInterval);
+        skyColor.lerpColors(sunsetSky, nightSky, (t - fortFiveSecondInterval) / fiftSecondInterval);
     }
     return { sunColor, skyColor };
 }
@@ -508,8 +515,8 @@ function updatePlanePhysics(plane, camera, input, deltaTime) {
     plane.quaternion.multiply(deltaQuat).normalize();
 
     // Update camera (follow behind)
-    const cameraDistance = 5;
-    const cameraHeight = 1;
+    const cameraDistance = 35;
+    const cameraHeight = 15;
     const cameraTarget = plane.position.clone();
     const cameraPos = cameraTarget.clone()
         .addScaledVector(forward, -cameraDistance)
@@ -536,6 +543,9 @@ function animate() {
     if (AIRCRAFT) {
         updatePlanePhysics(AIRCRAFT, CAMERA, input, delta);
         checkTerrainUpdate();
+        if (checkCollision()) {
+            reset();
+        }
         if(USE_ORBIT_CONTROLS) {
             CONTROLLER.target.copy(AIRCRAFT.position);
         }
@@ -553,12 +563,31 @@ function onWindowResize() {
     CAMERA.updateProjectionMatrix();
     RENDERER.setSize(window.innerWidth, window.innerHeight);
 }
-window.addEventListener('resize', onWindowResize, false);
 
 
-// /**
-//  * Reset the scene back to default
-//  * */
-// function reset() {
-//
-// }
+/**
+ * Check for collision with terrain
+ * */
+function checkCollision() {
+    if (AIRCRAFT.position.y < terrainYPosition) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Reset the scene back to default
+ * */
+function reset() {
+    velocity.set(0, 0, 0);
+    angularVelocity.set(0, 0, 0);
+    throttle = 0.5;
+    AIRCRAFT.position.y += 200;
+    const currentEuler = new THREE.Euler().setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
+    currentEuler.x = 0;
+    currentEuler.z = 0;
+    AIRCRAFT.quaternion.setFromEuler(currentEuler);
+    if (USE_ORBIT_CONTROLS) {
+        CONTROLLER.target.copy(AIRCRAFT.position);
+    }
+}
