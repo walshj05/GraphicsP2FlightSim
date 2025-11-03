@@ -555,6 +555,9 @@ function animate() {
     RENDERER.castShadow = true;
     RENDERER.render(SCENE, CAMERA);
     CAMERA.updateProjectionMatrix();
+    const speed = velocity.length();
+    document.getElementById('speed').innerText = `Speed: ${speed.toFixed(2)} m/s`;
+    document.getElementById('altitude').innerText = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'} m`;
 }
 animate();
 
@@ -579,7 +582,7 @@ function checkCollision() {
  * Reset the scene back to default
  * */
 function reset() {
-    velocity.set(0, 0, 0);
+    velocity.set(-20, 0, 0);
     angularVelocity.set(0, 0, 0);
     throttle = 0.5;
     AIRCRAFT.position.y += 200;
