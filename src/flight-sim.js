@@ -31,8 +31,8 @@ let throttle = 0.5; // range [0,1]
 
 // for shadows
 const SHADOW_MAP_SIZE = 4096;
-const SHADOW_CAMERA_NEAR = 30;
-const SHADOW_CAMERA_FAR = 1500;
+const SHADOW_CAMERA_NEAR = 500;
+const SHADOW_CAMERA_FAR = 6000;
 
 // for sky
 let dayState = { t:0 };
@@ -49,7 +49,7 @@ const SUNSETTINGS = {
 };
 const skyInitialPhi = 270;
 const skyInitialTheta = 180;
-const fogFar = 3500;
+//const fogFar = 3500;
 const fiftSecondInterval = 0.25;
 const thirtySecondInterval = 0.50;
 const fortFiveSecondInterval = 0.75;
@@ -106,7 +106,7 @@ function addTerrainChunk(x, y) {
     const rightEdge = chunkHeights[rightIndex] ? extractLeft(chunkHeights[rightIndex]) : null;
 
     // Generate new terrain chunk with edge constraints
-    const newTerrain = generateTerrain(6, 10, {
+    const newTerrain = generateTerrain(6, 6, {
         top: topEdge,
         bottom: bottomEdge,
         left: leftEdge,
@@ -268,7 +268,7 @@ function initializeSky(scene) {
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.Fog('white', 1, fogFar);
+    scene.fog = new THREE.FogExp2('white', 0.0007);
     return { sunPosition, sky };
 }
 
@@ -358,19 +358,47 @@ function updateTimeCycle() {
 /**
  * Updates sun and moon positions based on time
  * */
+/**
+ * Updates sun and moon positions based on time
+ * */
 function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
     const phi = THREE.MathUtils.degToRad(180 - t * 360);
+
+    // This is the normalized direction vector, used for the sky shader
+    // and to calculate the light's offset from the plane.
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
+    if (AIRCRAFT) {
+        const lightDist = 1000; // Keep the light source distant
+
+        // --- Sun ---
+        // Position the light relative to the aircraft
+        SKY.userData.sunLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, lightDist);
+        // Target the aircraft to keep the shadow camera centered on it
+        SKY.userData.sunLight.target.position.copy(AIRCRAFT.position);
+
+        // --- Moon ---
+        // Position the moon relative to the aircraft (opposite side)
+        SKY.userData.moonLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, -lightDist);
+        // Target the aircraft
+        SKY.userData.moonLight.target.position.copy(AIRCRAFT.position);
+
+    } else {
+        // Fallback for when aircraft isn't loaded yet
+        SKY.userData.sunLight.position.copy(sunPosition);
+        SKY.userData.sunLight.lookAt(0, 0, 0);
+        SKY.userData.moonLight.position.copy(sunPosition).multiplyScalar(-1);
+        SKY.userData.moonLight.lookAt(0, 0, 0);
+    }
+
+    // This uniform is for the SKY SHADER. It just needs the *direction*, so this is correct.
     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
-    SKY.userData.sunLight.position.copy(sunPosition);
-    SKY.userData.sunLight.lookAt(0, 0, 0);
-    SKY.userData.moonLight.position.copy(sunPosition).multiplyScalar(-1);
-    SKY.userData.moonLight.lookAt(0, 0, 0);
 
     const sunIntensity = Math.max(0, Math.cos(phi));
     const moonIntensity = Math.max(0, -Math.cos(phi));
+
+    // This return is fine, it's used by updateSky()
     return { phi, sunIntensity, moonIntensity, sunPosition };
 }
 
