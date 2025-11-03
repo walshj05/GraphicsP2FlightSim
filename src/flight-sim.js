@@ -33,6 +33,8 @@ let throttle = 0.5; // range [0,1]
 const SHADOW_MAP_SIZE = 4096;
 const SHADOW_CAMERA_NEAR = 500;
 const SHADOW_CAMERA_FAR = 6000;
+const SHADOW_BOX_MIN = 500;
+const SHADOW_BOX_MAX = 10000;
 
 // for sky
 let dayState = { t:0 };
@@ -94,8 +96,6 @@ function addTerrainChunk(x, y) {
     if (chunkHeights[key]) {
         return; // Chunk already exists
     }
-    
-    // Determine edge indexes
     const topIndex = `${x},${y + 1}`;
     const bottomIndex = `${x},${y - 1}`;
     const leftIndex = `${x - 1},${y}`;
@@ -104,8 +104,6 @@ function addTerrainChunk(x, y) {
     const bottomEdge = chunkHeights[bottomIndex] ? extractTop(chunkHeights[bottomIndex]) : null;
     const leftEdge = chunkHeights[leftIndex] ? extractRight(chunkHeights[leftIndex]) : null;
     const rightEdge = chunkHeights[rightIndex] ? extractLeft(chunkHeights[rightIndex]) : null;
-
-    // Generate new terrain chunk with edge constraints
     const newTerrain = generateTerrain(6, 6, {
         top: topEdge,
         bottom: bottomEdge,
@@ -123,7 +121,6 @@ function addTerrainChunk(x, y) {
  * @returns 
  */
 function generateNeighboringChunks(x, y) {
-    // Generate the central chunk and its 8 neighbors
     addTerrainChunk(x, y);
     for (const [dx, dy] of neighborDirections) {
         addTerrainChunk(x + dx, y + dy);
@@ -156,7 +153,6 @@ function addTerrainMesh(x, y) {
     mesh.rotation.x = -Math.PI / 2;
     mesh.rotation.z = Math.PI; // Correct orientation
     mesh.position.set(x * SQUARE_SIZE, terrainYPosition, y * SQUARE_SIZE);
-
     mesh.receiveShadow = true;
     mesh.castShadow = true;
     SCENE.add(mesh);
@@ -222,25 +218,16 @@ function initializeLights(scene, sunPosition, sky) {
     sunDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     sunDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
 
-    sunDirectionalLight.shadow.camera.left = -500;
-    sunDirectionalLight.shadow.camera.right = 500;
-    sunDirectionalLight.shadow.camera.top = 500;
-    sunDirectionalLight.shadow.camera.bottom = -500;
 
     sunDirectionalLight.position.copy(sunPosition);
     scene.add(sunDirectionalLight);
 
-    const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.2);
+    const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.5);
     moonDirectionalLight.castShadow = true;
     moonDirectionalLight.shadow.mapSize.width = SHADOW_MAP_SIZE;
     moonDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
     moonDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     moonDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
-
-    moonDirectionalLight.shadow.camera.left = -500;
-    moonDirectionalLight.shadow.camera.right = 500;
-    moonDirectionalLight.shadow.camera.top = 500;
-    moonDirectionalLight.shadow.camera.bottom = -500;
 
     moonDirectionalLight.position.copy(sunPosition);
     moonDirectionalLight.position.multiplyScalar(-1);
@@ -293,29 +280,18 @@ function initializeAircraft(scene) {
         })
 
         object.children[0].rotation.z = -Math.PI / 2;
-
-        // --- Scale first, then set position to be unambiguous ---
         const box = new THREE.Box3().setFromObject(object);
         const size = new THREE.Vector3();
         box.getSize(size);
-
-        // realWingspan is your target wingspan in world units (you used 52)
         const scaleFactor = WING_SPAN / size.x;
         object.scale.setScalar(scaleFactor);
-
-        // Now set the world position *after* scaling so position is exactly what you expect
         object.position.set(0, 200, 0);
-
-        // Align model so its local -X axis points along the initial velocity direction
-        // (we assume your initial velocity variable is set above: velocity = new THREE.Vector3(-20,0,0))
         if (velocity.length() > 0.0001) {
-            const desiredDir = velocity.clone().normalize();           // world-space direction we want
-            const modelForward = new THREE.Vector3(-1, 0, 0);         // model's forward in local coords (use -X)
+            const desiredDir = velocity.clone().normalize();
+            const modelForward = new THREE.Vector3(-1, 0, 0);
             const quat = new THREE.Quaternion().setFromUnitVectors(modelForward, desiredDir);
             object.quaternion.copy(quat);
         }
-
-        // animations (unchanged)
         if (gltf.animations && gltf.animations.length > 0) {
             MIXER = new THREE.AnimationMixer(object);
             gltf.animations.forEach((clip) => {
@@ -361,44 +337,42 @@ function updateTimeCycle() {
 /**
  * Updates sun and moon positions based on time
  * */
+/**
+ * Updates sun and moon positions based on time
+ * */
 function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
     const phi = THREE.MathUtils.degToRad(180 - t * 360);
-
-    // This is the normalized direction vector, used for the sky shader
-    // and to calculate the light's offset from the plane.
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
     if (AIRCRAFT) {
-        const lightDist = 1000; // Keep the light source distant
-
-        // --- Sun ---
-        // Position the light relative to the aircraft
+        const lightDist = 1000;
         SKY.userData.sunLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, lightDist);
-        // Target the aircraft to keep the shadow camera centered on it
         SKY.userData.sunLight.target.position.copy(AIRCRAFT.position);
-
-        // --- Moon ---
-        // Position the moon relative to the aircraft (opposite side)
         SKY.userData.moonLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, -lightDist);
-        // Target the aircraft
         SKY.userData.moonLight.target.position.copy(AIRCRAFT.position);
 
-    } else {
-        // Fallback for when aircraft isn't loaded yet
-        SKY.userData.sunLight.position.copy(sunPosition);
-        SKY.userData.sunLight.lookAt(0, 0, 0);
-        SKY.userData.moonLight.position.copy(sunPosition).multiplyScalar(-1);
-        SKY.userData.moonLight.lookAt(0, 0, 0);
     }
-
-    // This uniform is for the SKY SHADER. It just needs the *direction*, so this is correct.
     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
-
     const sunIntensity = Math.max(0, Math.cos(phi));
     const moonIntensity = Math.max(0, -Math.cos(phi));
+    const sunBoxSize = THREE.MathUtils.lerp(SHADOW_BOX_MAX, SHADOW_BOX_MIN, sunIntensity);
 
-    // This return is fine, it's used by updateSky()
+    const sunShadowCam = SKY.userData.sunLight.shadow.camera;
+    sunShadowCam.left = -sunBoxSize;
+    sunShadowCam.right = sunBoxSize;
+    sunShadowCam.top = sunBoxSize;
+    sunShadowCam.bottom = -sunBoxSize;
+    sunShadowCam.updateProjectionMatrix();
+
+    const moonBoxSize = THREE.MathUtils.lerp(SHADOW_BOX_MAX, SHADOW_BOX_MIN, moonIntensity);
+    const moonShadowCam = SKY.userData.moonLight.shadow.camera;
+    moonShadowCam.left = -moonBoxSize;
+    moonShadowCam.right = moonBoxSize;
+    moonShadowCam.top = moonBoxSize;
+    moonShadowCam.bottom = -moonBoxSize;
+    moonShadowCam.updateProjectionMatrix();
+
     return { phi, sunIntensity, moonIntensity, sunPosition };
 }
 
@@ -479,54 +453,28 @@ function updatePlanePhysics(plane, camera, input, deltaTime) {
     if (input.Shift) throttle = Math.min(1, throttle + deltaTime);
     if (input.Control)  throttle = Math.max(0, throttle - deltaTime);
     if (input[" "]) throttle = Math.max(0, throttle - 3 * deltaTime);
-
-    // Angular damping
     const damp = Math.max(0, 1 - ANG_DAMP_RATE * deltaTime);
     angularVelocity.multiplyScalar(damp);
-
-    // --- Forward and up vectors in world space ---
-    // Use local -X as forward because your velocity and intent are -X
     const forward = new THREE.Vector3(-1, 0, 0).applyQuaternion(plane.quaternion).normalize();
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(plane.quaternion).normalize();
-
-    // Compute thrust acceleration along forward (local -X in world space)
     const acceleration = new THREE.Vector3();
     acceleration.add(forward.clone().multiplyScalar(throttle * THRUST_SCALE));
-
-    // Gravity (world downward)
     acceleration.y += -GRAVITY;
-
-    // Compute horizontal (XZ-plane) speed magnitude
     const horizontalVel = new THREE.Vector3(velocity.x, 0, velocity.z);
     const horizontalSpeed = horizontalVel.length();
-
-    // Use speed^2 for lift (makes lift increase fast with speed without changing LIFT_FACTOR)
     const lift = LIFT_FACTOR * horizontalSpeed ** 2;
-    // Apply lift along the plane's *local up* (so pitch affects vertical lift)
     acceleration.add(up.clone().multiplyScalar(lift));
-
-    // Integrate velocity
     velocity.addScaledVector(acceleration, deltaTime);
-
-    // Apply drag (frame-rate independent)
     velocity.multiplyScalar(1 - DRAG_COEFFICIENT * deltaTime);
-
-    // Clamp speed
     const speed = velocity.length();
     if (speed > MAX_SPEED) velocity.multiplyScalar(MAX_SPEED / speed);
-
-    // Update position
     plane.position.addScaledVector(velocity, deltaTime);
     plane.position.y = Math.min(plane.position.y, MAX_ALTITUDE);
-
-    // Apply rotation from angular velocity (local axis approximation)
     const deltaEuler = angularVelocity.clone().multiplyScalar(deltaTime);
     const deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
         deltaEuler.x, deltaEuler.y, deltaEuler.z, 'XYZ'
     ));
     plane.quaternion.multiply(deltaQuat).normalize();
-
-    // Update camera (follow behind)
     const cameraDistance = 35;
     const cameraHeight = 15;
     const cameraTarget = plane.position.clone();
@@ -534,7 +482,7 @@ function updatePlanePhysics(plane, camera, input, deltaTime) {
         .addScaledVector(forward, -cameraDistance)
         .addScaledVector(up, cameraHeight);
 
-    camera.position.lerp(cameraPos, 0.1); // smooth follow
+    camera.position.lerp(cameraPos, 0.1);
     camera.lookAt(cameraTarget);
 }
 
@@ -568,7 +516,6 @@ function animate() {
     RENDERER.shadowMap.enabled = true;
     RENDERER.shadowMap.type = THREE.PCFSoftShadowMap;
     RENDERER.render(SCENE, CAMERA);
-    CAMERA.updateProjectionMatrix();
     const speed = velocity.length();
     document.getElementById('speed').innerText = `${speed.toFixed(2)}`;
     document.getElementById('altitude').innerText = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'} m`;
@@ -577,7 +524,6 @@ animate();
 
 function onWindowResize() {
     CAMERA.aspect = window.innerWidth / window.innerHeight;
-    CAMERA.updateProjectionMatrix();
     RENDERER.setSize(window.innerWidth, window.innerHeight);
 }
 
