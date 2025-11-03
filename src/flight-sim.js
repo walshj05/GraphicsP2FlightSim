@@ -30,12 +30,11 @@ let angularVelocity = new THREE.Vector3(0, 0, 0); // pitch (x), yaw (y), roll (z
 let throttle = 0.5; // range [0,1]
 
 // for shadows
-const SHADOW_MAP_SIZE = 2048;
-const SHADOW_CAMERA_NEAR = 0.5;
-const SHADOW_CAMERA_FAR = 5000;
+const SHADOW_MAP_SIZE = 4096;
+const SHADOW_CAMERA_NEAR = 30;
+const SHADOW_CAMERA_FAR = 1500;
 
 // for sky
-let sunAngle = 180;
 let dayState = { t:0 };
 let tweenStarted = false;
 const duration = 60000;
@@ -57,7 +56,6 @@ const fortFiveSecondInterval = 0.75;
 
 //for scene 
 const USE_ORBIT_CONTROLS = true;
-const DEBUG = false;
 document.getElementById('reset')?.addEventListener('click', reset);
 window.addEventListener('resize', onWindowResize, false);
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
@@ -108,7 +106,7 @@ function addTerrainChunk(x, y) {
     const rightEdge = chunkHeights[rightIndex] ? extractLeft(chunkHeights[rightIndex]) : null;
 
     // Generate new terrain chunk with edge constraints
-    const newTerrain = generateTerrain(5, 5, {
+    const newTerrain = generateTerrain(6, 10, {
         top: topEdge,
         bottom: bottomEdge,
         left: leftEdge,
@@ -166,39 +164,6 @@ function addTerrainMesh(x, y) {
 
 
 /**
- * Adds visual helpers to the scene for debugging.
- * Includes axis-helper, grid helper, and a light helper.
- * @returns {void}
- */
-function addHelpers() {
-    const axesHelper = new THREE.AxesHelper(500);
-    SCENE.add(axesHelper);
-    const gridHelper = new THREE.GridHelper(10000, 100, 0x888888, 0x444444);
-    SCENE.add(gridHelper);
-    const lightHelper = new THREE.DirectionalLightHelper(SKY.userData.sunLight, 5);
-    SCENE.add(lightHelper);
-    const controlsGroup = document.getElementById('controls') || document.createElement('div');
-    controlsGroup.id = 'controls';
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '360';
-    slider.value = '90';
-    slider.id = 'sunSlider';
-    controlsGroup.appendChild(slider);
-    if (!document.getElementById('controls')) {
-        document.body.appendChild(controlsGroup);
-    }
-    slider.addEventListener('input', (event) => {
-        sunAngle = parseFloat(event.target.value);
-    })
-}
-
-if (DEBUG) {
-    addHelpers();
-}
-
-/**
  * Initializes the Three.js scene, camera, renderer, sky, lights, and orbit controls.
  * @returns {[THREE.Scene, THREE.Camera, THREE.WebGLRenderer, OrbitControls, Sky]}
  */
@@ -210,6 +175,8 @@ function initScene() {
     const renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
     const container = document.getElementById('container');
     container.appendChild(renderer.domElement);
     const controls = initializeOrbitControls(camera, renderer);
@@ -254,6 +221,12 @@ function initializeLights(scene, sunPosition, sky) {
     sunDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
     sunDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     sunDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
+
+    sunDirectionalLight.shadow.camera.left = -500;
+    sunDirectionalLight.shadow.camera.right = 500;
+    sunDirectionalLight.shadow.camera.top = 500;
+    sunDirectionalLight.shadow.camera.bottom = -500;
+
     sunDirectionalLight.position.copy(sunPosition);
     scene.add(sunDirectionalLight);
 
@@ -263,6 +236,12 @@ function initializeLights(scene, sunPosition, sky) {
     moonDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
     moonDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     moonDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
+
+    moonDirectionalLight.shadow.camera.left = -500;
+    moonDirectionalLight.shadow.camera.right = 500;
+    moonDirectionalLight.shadow.camera.top = 500;
+    moonDirectionalLight.shadow.camera.bottom = -500;
+
     moonDirectionalLight.position.copy(sunPosition);
     moonDirectionalLight.position.multiplyScalar(-1);
     scene.add(moonDirectionalLight);
@@ -305,7 +284,14 @@ function initializeAircraft(scene) {
     glbLoader.load(glbPath, (gltf) => {
         const object = gltf.scene;
         AIRCRAFT = object;
-        AIRCRAFT.castShadow = true;
+
+        AIRCRAFT.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        })
+
         object.children[0].rotation.z = -Math.PI / 2;
 
         // --- Scale first, then set position to be unambiguous ---
@@ -337,8 +323,7 @@ function initializeAircraft(scene) {
                 action.play();
             });
         }
-
-        if (!DEBUG) scene.add(object);
+        scene.add(object);
     });
 }
 
@@ -357,9 +342,6 @@ function updateSky() {
  * Updates time and tween cycle for day
  * */
 function updateTimeCycle() {
-    if (DEBUG) {
-        return (dayState.t = sunAngle / 360);
-    }
     if (!tweenStarted) {
         new TWEEN.Tween(dayState)
             .to({ t: 1 }, duration)
@@ -380,11 +362,13 @@ function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
     const phi = THREE.MathUtils.degToRad(180 - t * 360);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+
     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
     SKY.userData.sunLight.position.copy(sunPosition);
     SKY.userData.sunLight.lookAt(0, 0, 0);
     SKY.userData.moonLight.position.copy(sunPosition).multiplyScalar(-1);
     SKY.userData.moonLight.lookAt(0, 0, 0);
+
     const sunIntensity = Math.max(0, Math.cos(phi));
     const moonIntensity = Math.max(0, -Math.cos(phi));
     return { phi, sunIntensity, moonIntensity, sunPosition };
@@ -428,7 +412,7 @@ function updateSkyColors(t) {
 }
 
 /**
- *
+ * Updates the lighting in the scene based on sun and moon positions and colors.
  * **/
 function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
     const sunLight = SKY.userData.sunLight;
@@ -553,6 +537,8 @@ function animate() {
     updateSky();
     CONTROLLER.update();
     RENDERER.castShadow = true;
+    RENDERER.shadowMap.enabled = true;
+    RENDERER.shadowMap.type = THREE.PCFSoftShadowMap;
     RENDERER.render(SCENE, CAMERA);
     CAMERA.updateProjectionMatrix();
     const speed = velocity.length();
