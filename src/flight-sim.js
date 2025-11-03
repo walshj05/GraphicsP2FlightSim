@@ -13,6 +13,7 @@ import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
 
+
 // Physics constants
 const WING_SPAN = 52; // meters
 const MAX_SPEED = 55; // m/s
@@ -78,12 +79,16 @@ const neighborDirections = [
     [1, -1], [-1, 1]
 ];
 
+
 // textures and materials
 const terrainTexture = new THREE.TextureLoader().load(new URL('https://cdn.architextures.org/textures/23/10/grass-none-e6q3dt.jpg', import.meta.url).href);
 terrainTexture.wrapS = THREE.RepeatWrapping;
 terrainTexture.wrapT = THREE.RepeatWrapping;
 terrainTexture.repeat.set( 10, 10 );
 const terrainMaterial = new THREE.MeshStandardMaterial({ map: terrainTexture });
+
+addTerrainChunk(0, 0);
+const planeInitialY = chunkHeights['0,0'][17][17] + 200;
 
 /**
  * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
@@ -108,7 +113,7 @@ function addTerrainChunk(x, y) {
     const rightEdge = chunkHeights[rightIndex] ? extractLeft(chunkHeights[rightIndex]) : null;
 
     // Generate new terrain chunk with edge constraints
-    const newTerrain = generateTerrain(5, 5, {
+    const newTerrain = generateTerrain(6, 8, {
         top: topEdge,
         bottom: bottomEdge,
         left: leftEdge,
@@ -318,7 +323,7 @@ function initializeAircraft(scene) {
         object.scale.setScalar(scaleFactor);
 
         // Now set the world position *after* scaling so position is exactly what you expect
-        object.position.set(0, 200, 0);
+        object.position.set(0, planeInitialY, 0);
 
         // Align model so its local -X axis points along the initial velocity direction
         // (we assume your initial velocity variable is set above: velocity = new THREE.Vector3(-20,0,0))
@@ -585,7 +590,7 @@ function reset() {
     velocity.set(-20, 0, 0);
     angularVelocity.set(0, 0, 0);
     throttle = 0.5;
-    AIRCRAFT.position.y += 200;
+    AIRCRAFT.position.y = planeInitialY;
     const currentEuler = new THREE.Euler().setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
     currentEuler.x = 0;
     currentEuler.z = 0;
