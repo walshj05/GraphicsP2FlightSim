@@ -556,7 +556,7 @@ function animate() {
     RENDERER.render(SCENE, CAMERA);
     CAMERA.updateProjectionMatrix();
     const speed = velocity.length();
-    document.getElementById('speed').innerText = `Speed: ${speed.toFixed(2)} m/s`;
+    document.getElementById('speed').innerText = `${speed.toFixed(2)}`;
     document.getElementById('altitude').innerText = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'} m`;
 }
 animate();
