@@ -7,11 +7,11 @@
  */
 
 import * as THREE from 'three';
-import { Sky } from 'three/addons/objects/Sky.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
+import {Sky} from 'three/addons/objects/Sky.js';
+import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls'
 import * as TWEEN from 'three/examples/jsm/libs/tween.module.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { generateTerrain, extractTop, extractBottom, extractLeft, extractRight } from './terrain-generation.js';
+import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
+import {extractBottom, extractLeft, extractRight, extractTop, generateTerrain} from './terrain-generation.js';
 
 
 // Physics constants
@@ -37,9 +37,16 @@ const SHADOW_CAMERA_FAR = 6000;
 const SHADOW_BOX_MIN = 500;
 const SHADOW_BOX_MAX = 10000;
 
+//lights
+const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 5.0);
+const ambientLight = new THREE.AmbientLight(0xffffff, .01);
+const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.5);
+
+
 // for sky
 let dayState = { t:0 };
 let tweenStarted = false;
+let NIGHT_SPHERE;
 const duration = 60000;
 const skyScale = 450000;
 const SUNSETTINGS = {
@@ -52,12 +59,27 @@ const SUNSETTINGS = {
 };
 const skyInitialPhi = 270;
 const skyInitialTheta = 180;
-//const fogFar = 3500;
 const fiftSecondInterval = 0.25;
 const thirtySecondInterval = 0.50;
 const fortFiveSecondInterval = 0.75;
+const helperSunColor = new THREE.Color();
+const helperSkyColor = new THREE.Color();
 
-//for scene 
+//colors
+const colorWhite = new THREE.Color(0xffffff);
+const mistyColor = new THREE.Color(0x999999);
+const midnight = new THREE.Color(0x000000);    // Black (no light)
+const sunrise = new THREE.Color(0xffb366);     // Light Orange
+const noon = new THREE.Color(0xffffff);        // White
+const sunset = new THREE.Color(0xff8844);      // Deep Orange
+const nightSky = new THREE.Color(0x000011);     // Very Dark Blue (almost black)
+const daySky = new THREE.Color(0x87b7cb);       // A less saturated sky blue
+const noonSky = new THREE.Color(0xadc8d6);      // A less saturated light blue
+const sunsetSky = new THREE.Color(0xff8844);    // Orange Sunset
+const dawnSky = new THREE.Color(0x3a5a78);      // A dark, grey-blue for pre-sunrise
+
+
+//for scene
 const USE_ORBIT_CONTROLS = true;
 document.getElementById('reset')?.addEventListener('click', reset);
 window.addEventListener('resize', onWindowResize, false);
@@ -67,6 +89,10 @@ const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 let AIRCRAFT;
 let MIXER; // Animation mixer for GLB animations
 let CLOCK = new THREE.Clock(); // Clock for animation timing
+let propellerAction;
+
+// for reset
+const resetEuler = new THREE.Euler();
 
 // for terrain
 const SQUARE_SIZE = 2000; // meters
@@ -94,7 +120,7 @@ const planeInitialY = chunkHeights['0,0'][17][17] + 200;
  * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
  * @param {*} x integer x position
  * @param {*} y integer y position
- * @returns 
+ * @returns
  */
 function addTerrainChunk(x, y) {
     const key = `${x},${y}`;
@@ -123,7 +149,7 @@ function addTerrainChunk(x, y) {
  * Generates terrain chunks for the specified (x, y) grid position and its 8 neighbors.
  * @param {*} x integer x position
  * @param {*} y integer y position
- * @returns 
+ * @returns
  */
 function generateNeighboringChunks(x, y) {
     addTerrainChunk(x, y);
@@ -136,7 +162,7 @@ function generateNeighboringChunks(x, y) {
  * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
  * @param {*} x integer x position
  * @param {*} y integer y position
- * @returns 
+ * @returns
  */
 function addTerrainMesh(x, y) {
     const key = `${x},${y}`;
@@ -144,7 +170,6 @@ function addTerrainMesh(x, y) {
     if (!terrainData) {
         return; // No terrain data available
     }
-    
     const size = terrainData.length - 1;
     const geometry = new THREE.PlaneGeometry(SQUARE_SIZE, SQUARE_SIZE, size, size);
     const mesh = new THREE.Mesh(geometry, terrainMaterial);
@@ -171,13 +196,11 @@ function addTerrainMesh(x, y) {
 function initScene() {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(120, window.innerWidth / window.innerHeight, 0.1, 10000);
-
     const {sunPosition, sky} = initializeSky(scene);
     const renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
     const container = document.getElementById('container');
     container.appendChild(renderer.domElement);
     const controls = initializeOrbitControls(camera, renderer);
@@ -187,6 +210,7 @@ function initScene() {
     controls.update();
 
     initializeLights(scene, sunPosition, sky);
+    initializeNightSphere(scene);
 
     return [scene, camera, renderer, controls, sky, aircraft];
 }
@@ -213,34 +237,44 @@ function initializeOrbitControls(camera, renderer) {
  * @returns {THREE.DirectionalLight}
  */
 function initializeLights(scene, sunPosition, sky) {
-    const ambientLight = new THREE.AmbientLight(0xffffff, .01);
     scene.add(ambientLight);
 
-    const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
     sunDirectionalLight.castShadow = true;
     sunDirectionalLight.shadow.mapSize.width = SHADOW_MAP_SIZE;
     sunDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
     sunDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     sunDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
-
-
     sunDirectionalLight.position.copy(sunPosition);
-    scene.add(sunDirectionalLight);
 
-    const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.5);
+    scene.add(sunDirectionalLight);
     moonDirectionalLight.castShadow = true;
     moonDirectionalLight.shadow.mapSize.width = SHADOW_MAP_SIZE;
     moonDirectionalLight.shadow.mapSize.height = SHADOW_MAP_SIZE;
     moonDirectionalLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
     moonDirectionalLight.shadow.camera.far = SHADOW_CAMERA_FAR;
-
     moonDirectionalLight.position.copy(sunPosition);
     moonDirectionalLight.position.multiplyScalar(-1);
-    scene.add(moonDirectionalLight);
 
+    scene.add(moonDirectionalLight);
     sky.userData.sunLight = sunDirectionalLight;
     sky.userData.moonLight = moonDirectionalLight;
     return sunDirectionalLight;
+}
+
+/** initialize a night sphere to be used for night sky
+ * @param {THREE.Scene} scene - Scene to attach the night sphere.
+ * */
+function initializeNightSphere(scene) {
+    const geometry = new THREE.SphereGeometry(9000, 32, 32);
+    const material = new THREE.MeshBasicMaterial({
+        color: 0x000011,
+        transparent: true,
+        opacity: 0,
+        side: THREE.BackSide,
+        depthWrite: false
+    });
+    NIGHT_SPHERE = new THREE.Mesh(geometry, material);
+    scene.add(NIGHT_SPHERE);
 }
 
 /**
@@ -260,7 +294,7 @@ function initializeSky(scene) {
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.FogExp2('white', 0.0007);
+    scene.fog = new THREE.FogExp2('white', 0.0009);
     return { sunPosition, sky };
 }
 
@@ -272,30 +306,22 @@ function initializeSky(scene) {
 function initializeAircraft(scene) {
     const glbPath = new URL('./models/cargo_aircraft.glb', import.meta.url).href;
     const glbLoader = new GLTFLoader();
-
     glbLoader.load(glbPath, (gltf) => {
         const object = gltf.scene;
         AIRCRAFT = object;
-
         AIRCRAFT.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
             }
         })
-
         object.children[0].rotation.z = -Math.PI / 2;
         const box = new THREE.Box3().setFromObject(object);
         const size = new THREE.Vector3();
         box.getSize(size);
         const scaleFactor = WING_SPAN / size.x;
         object.scale.setScalar(scaleFactor);
-
-        // Now set the world position *after* scaling so position is exactly what you expect
         object.position.set(0, planeInitialY, 0);
-
-        // Align model so its local -X axis points along the initial velocity direction
-        // (we assume your initial velocity variable is set above: velocity = new THREE.Vector3(-20,0,0))
         if (velocity.length() > 0.0001) {
             const desiredDir = velocity.clone().normalize();
             const modelForward = new THREE.Vector3(-1, 0, 0);
@@ -307,6 +333,9 @@ function initializeAircraft(scene) {
             gltf.animations.forEach((clip) => {
                 const action = MIXER.clipAction(clip);
                 action.play();
+                if (clip.name === 'Scene') {
+                    propellerAction = action;
+                }
             });
         }
         scene.add(object);
@@ -344,12 +373,8 @@ function updateTimeCycle() {
 /**
  * Updates sun and moon positions based on time
  * */
-/**
- * Updates sun and moon positions based on time
- * */
-/**
- * Updates sun and moon positions based on time
- * */
+
+
 function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
     const phi = THREE.MathUtils.degToRad(180 - t * 360);
@@ -361,7 +386,6 @@ function updateSunAndMoonPositions(t) {
         SKY.userData.sunLight.target.position.copy(AIRCRAFT.position);
         SKY.userData.moonLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, -lightDist);
         SKY.userData.moonLight.target.position.copy(AIRCRAFT.position);
-
     }
     SKY.material.uniforms.sunPosition.value.copy(sunPosition);
     const sunIntensity = Math.max(0, Math.cos(phi));
@@ -390,39 +414,52 @@ function updateSunAndMoonPositions(t) {
  * Updates sun and sky colors based on time
  * */
 function updateSkyColors(t) {
-    const midnight = new THREE.Color(0x112244);
-    const sunrise = new THREE.Color(0xffb366);
-    const noon = new THREE.Color(0xffffff);
-    const sunset = new THREE.Color(0xff8844);
-
-    const nightSky = new THREE.Color(0x000011);
-    const noonSky = new THREE.Color(0xadd8e6);
-    const sunsetSky = new THREE.Color(0xff8844);
-    const daySky = new THREE.Color(0x87ceeb);
-
-    let sunColor = new THREE.Color();
-    let skyColor = new THREE.Color();
-
     if (t < fiftSecondInterval) {
-        // Midnight (0.0) → Sunrise (0.25)
-        sunColor.lerpColors(midnight, sunrise, t / fiftSecondInterval);
-        skyColor.lerpColors(nightSky, daySky, t / fiftSecondInterval);
+        const progress = t / fiftSecondInterval;
+        helperSunColor.lerpColors(midnight, sunrise, progress);
+
+        if (progress < 0.8) {
+            helperSkyColor.copy(nightSky);
+        } else if (progress < 0.9) {
+            const dawnProgress = (progress - 0.8) / 0.1;
+            helperSkyColor.lerpColors(nightSky, dawnSky, dawnProgress);
+        } else {
+            const dayProgress = (progress - 0.9) / 0.1;
+            helperSkyColor.lerpColors(dawnSky, daySky, dayProgress);
+        }
+
     } else if (t < thirtySecondInterval) {
-        // Sunrise (0.25) → Noon (0.50)
-        sunColor.lerpColors(sunrise, noon, (t - fiftSecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(daySky, noonSky, (t - fiftSecondInterval) / fiftSecondInterval);
+        const progress = (t - fiftSecondInterval) / fiftSecondInterval;
+        helperSunColor.lerpColors(sunrise, noon, progress);
+        helperSkyColor.lerpColors(daySky, noonSky, progress);
+
     } else if (t < fortFiveSecondInterval) {
-        // Noon (0.50) → Sunset (0.75)
-        sunColor.lerpColors(noon, sunset, (t - thirtySecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(noonSky, sunsetSky, (t - thirtySecondInterval) / fiftSecondInterval);
+        const progress = (t - thirtySecondInterval) / fiftSecondInterval;
+
+        helperSunColor.lerpColors(noon, sunset, progress);
+
+        const split = 0.6;
+        if (progress < split) {
+            const afternoonProgress = progress / split;
+            helperSkyColor.lerpColors(noonSky, daySky, afternoonProgress);
+        } else {
+            const sunsetProgress = (progress - split) / (1.0 - split);
+            helperSkyColor.lerpColors(daySky, sunsetSky, sunsetProgress);
+        }
+
     } else {
-        // Sunset (0.75) → Midnight (1.0)
-        sunColor.lerpColors(sunset, midnight, (t - fortFiveSecondInterval) / fiftSecondInterval);
-        skyColor.lerpColors(sunsetSky, nightSky, (t - fortFiveSecondInterval) / fiftSecondInterval);
+        const progress = (t - fortFiveSecondInterval) / fiftSecondInterval;
+
+        helperSunColor.lerpColors(sunset, midnight, progress);
+        helperSkyColor.lerpColors(sunsetSky, nightSky, progress);
     }
-    return { sunColor, skyColor };
+
+    return { sunColor: helperSunColor, skyColor: helperSkyColor };
 }
 
+/**
+ * Updates the lighting in the scene based on sun and moon positions and colors.
+ * **/
 /**
  * Updates the lighting in the scene based on sun and moon positions and colors.
  * **/
@@ -430,15 +467,30 @@ function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
     const sunLight = SKY.userData.sunLight;
     const moonLight = SKY.userData.moonLight;
     const ambient = SCENE.children.find(obj => obj.isAmbientLight);
-    sunLight.intensity = THREE.MathUtils.lerp(0.05, 1.5, sunIntensity);
-    moonLight.intensity = THREE.MathUtils.lerp(0.05, 0.3, moonIntensity);
-    ambient && (ambient.intensity = THREE.MathUtils.lerp(0.05, 0.5, sunIntensity));
+    sunLight.intensity = THREE.MathUtils.lerp(0.0, 1.5, sunIntensity);
+    moonLight.intensity = THREE.MathUtils.lerp(0.0, 0.1, moonIntensity);
+    ambient && (ambient.intensity = THREE.MathUtils.lerp(0.0, 0.5, sunIntensity));
     sunLight.color.copy(sunColor);
-    moonLight.color.copy(new THREE.Color(0xB0C4DE)); //soft blue
-    ambient && ambient.color.copy(sunColor.clone().multiplyScalar(0.5));
+    moonLight.color.copy(colorWhite);
+    ambient && ambient.color.copy(colorWhite);
     SCENE.background = skyColor;
-    SCENE.fog.color.copy(skyColor.clone().lerp(new THREE.Color(0x111111),0.3));
+    SCENE.fog.color.copy(skyColor).lerp(mistyColor, moonIntensity);
+
+    if (NIGHT_SPHERE && AIRCRAFT) {
+        NIGHT_SPHERE.material.opacity = THREE.MathUtils.clamp(1 - sunIntensity * 2, 0, 0.95);
+        NIGHT_SPHERE.material.color.copy(SCENE.fog.color);
+        NIGHT_SPHERE.position.copy(AIRCRAFT.position);
+    }
+
+    const shadowCam = sunLight.shadow.camera;
+    const boxSize = THREE.MathUtils.lerp(6000, 500, sunIntensity);
+    shadowCam.left = -boxSize;
+    shadowCam.right = boxSize;
+    shadowCam.top = boxSize;
+    shadowCam.bottom = -boxSize;
+    shadowCam.updateProjectionMatrix();
 }
+
 
 
 /**
@@ -510,6 +562,10 @@ function animate() {
     if (MIXER) {
         MIXER.update(delta);
     }
+    if (propellerAction) {
+        const spinSpeedMultiplier = 5.0;
+        propellerAction.timeScale = throttle * spinSpeedMultiplier;
+    }
     if (AIRCRAFT) {
         updatePlanePhysics(AIRCRAFT, CAMERA, input, delta);
         checkTerrainUpdate();
@@ -522,9 +578,6 @@ function animate() {
     }
     updateSky();
     CONTROLLER.update();
-    RENDERER.castShadow = true;
-    RENDERER.shadowMap.enabled = true;
-    RENDERER.shadowMap.type = THREE.PCFSoftShadowMap;
     RENDERER.render(SCENE, CAMERA);
     const speed = velocity.length();
     document.getElementById('speed').innerText = `${speed.toFixed(2)}`;
@@ -536,6 +589,7 @@ function onWindowResize() {
     CAMERA.aspect = window.innerWidth / window.innerHeight;
     RENDERER.setSize(window.innerWidth, window.innerHeight);
 }
+
 
 
 /**
@@ -556,10 +610,12 @@ function reset() {
     angularVelocity.set(0, 0, 0);
     throttle = 0.5;
     AIRCRAFT.position.y = planeInitialY;
-    const currentEuler = new THREE.Euler().setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
-    currentEuler.x = 0;
-    currentEuler.z = 0;
-    AIRCRAFT.quaternion.setFromEuler(currentEuler);
+
+    resetEuler.setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
+    resetEuler.x = 0;
+    resetEuler.z = 0;
+    AIRCRAFT.quaternion.setFromEuler(resetEuler);
+
     if (USE_ORBIT_CONTROLS) {
         CONTROLLER.target.copy(AIRCRAFT.position);
     }
