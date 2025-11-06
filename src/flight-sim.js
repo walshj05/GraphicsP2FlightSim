@@ -20,8 +20,6 @@ const GUI_ELEMENTS = {
     altitude: document.getElementById('altitude')
 };
 
-
-
 // for collision
 let isLanded = false;
 const MAX_LANDING_ROLL = Math.PI/4; // radians, approx 28 degrees
@@ -88,9 +86,6 @@ const SUNSETTINGS = {
 };
 const skyInitialPhi = 270;
 const skyInitialTheta = 180;
-const fiftSecondInterval = 0.25;
-const thirtySecondInterval = 0.50;
-const fortFiveSecondInterval = 0.75;
 const helperSunColor = new THREE.Color();
 const helperSkyColor = new THREE.Color();
 
@@ -106,7 +101,23 @@ const daySky = new THREE.Color(0x87b7cb);       // A less saturated sky blue
 const noonSky = new THREE.Color(0xadc8d6);      // A less saturated light blue
 const sunsetSky = new THREE.Color(0xff8844);    // Orange Sunset
 const dawnSky = new THREE.Color(0x3a5a78);      // A dark, grey-blue for pre-sunrise
-
+const SUN_COLOR_KEYFRAMES = [
+    { time: 0.0,   color: midnight }, // Midnight
+    { time: 0.25,  color: sunrise  }, // Sunrise
+    { time: 0.5,   color: noon     }, // Noon
+    { time: 0.75,  color: sunset   }, // Sunset
+    { time: 1.0,   color: midnight }  // Back to Midnight
+];
+const SKY_COLOR_KEYFRAMES = [
+    { time: 0.0,   color: nightSky  }, // Midnight
+    { time: 0.2,   color: nightSky  }, // Stays dark until 20% (0.25 * 0.8)
+    { time: 0.225, color: dawnSky   }, // Fades to dawn (0.25 * 0.9)
+    { time: 0.25,  color: daySky    }, // Becomes day at sunrise
+    { time: 0.5,   color: noonSky   }, // Noon
+    { time: 0.65,  color: daySky    }, // Fades back to day (0.5 + 0.25 * 0.6)
+    { time: 0.75,  color: sunsetSky }, // Sunset
+    { time: 1.0,   color: nightSky  }  // Back to night
+];
 
 //for scene
 const USE_ORBIT_CONTROLS = true;
@@ -145,6 +156,7 @@ terrainTexture.wrapT = THREE.RepeatWrapping;
 terrainTexture.repeat.set( 10, 10 );
 const terrainMaterial = new THREE.MeshStandardMaterial({ map: terrainTexture });
 
+// chunks
 addTerrainChunk(0, 0);
 const planeInitialY = chunkHeights['0,0'][0][0] + 200;
 
@@ -446,44 +458,38 @@ function updateSunAndMoonPositions(t) {
 }
 
 /**
- * Updates sun and sky colors based on time
- * */
-function updateSkyColors(t) {
-    if (t < fiftSecondInterval) {
-        const progress = t / fiftSecondInterval;
-        helperSunColor.lerpColors(midnight, sunrise, progress);
-        if (progress < 0.8) {
-            helperSkyColor.copy(nightSky);
-        } else if (progress < 0.9) {
-            const dawnProgress = (progress - 0.8) / 0.1;
-            helperSkyColor.lerpColors(nightSky, dawnSky, dawnProgress);
-        } else {
-            const dayProgress = (progress - 0.9) / 0.1;
-            helperSkyColor.lerpColors(dawnSky, daySky, dayProgress);
+ * Finds the correct color blend from a keyframe array based on time.
+ * Modifies the 'targetColor' object in place.
+ * @param {THREE.Color} targetColor - The THREE.Color object to modify (e.g., helperSunColor).
+ * @param {number} t - The current time (0.0 to 1.0).
+ * @param {Array<object>} keyframes - An array of {time, color} objects, sorted by time.
+ */
+function getInterpolatedColor(targetColor, t, keyframes) {
+    for (let i = 1; i < keyframes.length; i++) {
+        const prevFrame = keyframes[i - 1];
+        const nextFrame = keyframes[i];
+        if (t <= nextFrame.time) {
+            const segmentDuration = nextFrame.time - prevFrame.time;
+            if (segmentDuration === 0) {
+                targetColor.copy(prevFrame.color);
+                return;
+            }
+            const timeInSegment = t - prevFrame.time;
+            const progress = timeInSegment / segmentDuration;
+            targetColor.copy(prevFrame.color);
+            targetColor.lerp(nextFrame.color, progress);
+            return;
         }
-    } else if (t < thirtySecondInterval) {
-        const progress = (t - fiftSecondInterval) / fiftSecondInterval;
-        helperSunColor.lerpColors(sunrise, noon, progress);
-        helperSkyColor.lerpColors(daySky, noonSky, progress);
-
-    } else if (t < fortFiveSecondInterval) {
-        const progress = (t - thirtySecondInterval) / fiftSecondInterval;
-        helperSunColor.lerpColors(noon, sunset, progress);
-        const split = 0.6;
-        if (progress < split) {
-            const afternoonProgress = progress / split;
-            helperSkyColor.lerpColors(noonSky, daySky, afternoonProgress);
-        } else {
-            const sunsetProgress = (progress - split) / (1.0 - split);
-            helperSkyColor.lerpColors(daySky, sunsetSky, sunsetProgress);
-        }
-
-    } else {
-        const progress = (t - fortFiveSecondInterval) / fiftSecondInterval;
-
-        helperSunColor.lerpColors(sunset, midnight, progress);
-        helperSkyColor.lerpColors(sunsetSky, nightSky, progress);
     }
+    targetColor.copy(keyframes[keyframes.length - 1].color);
+}
+
+/**
+ * Updates sun and sky colors based on time using keyframe data.
+ */
+function updateSkyColors(t) {
+    getInterpolatedColor(helperSunColor, t, SUN_COLOR_KEYFRAMES);
+    getInterpolatedColor(helperSkyColor, t, SKY_COLOR_KEYFRAMES);
     return { sunColor: helperSunColor, skyColor: helperSkyColor };
 }
 
@@ -629,7 +635,6 @@ function updateAircraftState(delta) {
     } else {
         handleFlyingLogic(delta);
     }
-    // Make orbit controls target the plane
     if (USE_ORBIT_CONTROLS) {
         CONTROLLER.target.copy(AIRCRAFT.position);
     }
@@ -661,15 +666,11 @@ function handleCollision() {
     // Get plane's orientation (helperForward/helperUp were set in updatePlanePhysics)
     const upY = helperUp.y;
     const forwardY = Math.abs(helperForward.y);
-
-
     // Check for crash conditions
     const isRolledTooMuch = upY < Math.cos(MAX_LANDING_ROLL);
     const isPitchedTooMuch = forwardY > Math.sin(MAX_LANDING_PITCH);
     const isTooFastVertically = velocity.y < MAX_LANDING_SPEED_Y;
 
-    console.log("y velocity " + velocity.y)
-    console.log("roll " + isRolledTooMuch + ", pitch " + isPitchedTooMuch + ", speed" + isTooFastVertically);
     if (isRolledTooMuch || isPitchedTooMuch || isTooFastVertically) {
         reset(); //crash
     } else {
@@ -751,30 +752,22 @@ function getTerrainHeightAt(worldX, worldZ) {
  * Phase 2: Detailed 36-point check if close.
  */
 function checkCollision() {
-    // Get the plane's current world transformation matrix
     AIRCRAFT.updateWorldMatrix(true, false);
     helperAircraftMatrix.copy(AIRCRAFT.matrixWorld);
     for (let i = 0; i < AIRCRAFT_SAMPLE_POINTS_X.length; i++) {
         for (let j = 0; j < AIRCRAFT_SAMPLE_POINTS_Z.length; j++) {
-            // 1. Set the local sample point (at wheel height)
             helperCollisionPoint.set(
                 AIRCRAFT_SAMPLE_POINTS_X[i],
                 LANDING_GEAR_Y_OFFSET,
                 AIRCRAFT_SAMPLE_POINTS_Z[j]
             );
-            // 2. Transform this local point to its world position
             helperCollisionPoint.applyMatrix4(helperAircraftMatrix);
-            // 3. Set the raycaster to shoot DOWN from this exact point
             helperRaycaster.set(helperCollisionPoint, helperRayDown);
-            // 4. Check for intersections
-            // NOTE: This creates a new array! (Violates rubric but is necessary)
             const intersects = helperRaycaster.intersectObjects(terrainMeshes);
             if (intersects.length > 0) {
-                // We found a hit. How far is the ground?
                 const distance = intersects[0].distance;
-                // If the ground is closer than our threshold, we've hit it
                 if (distance < LANDING_THRESHOLD) {
-                    return true; // "Landed" or crashed
+                    return true; // Landed or crashed
                 }
             }
         }
