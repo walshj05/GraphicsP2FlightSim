@@ -14,6 +14,36 @@ import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {extractBottom, extractLeft, extractRight, extractTop, generateTerrain} from './terrain-generation.js';
 
 
+// gui
+const GUI_ELEMENTS = {
+    speed: document.getElementById('speed'),
+    altitude: document.getElementById('altitude')
+};
+
+
+
+// for collision
+let isLanded = false;
+const MAX_LANDING_ROLL = Math.PI/4; // radians, approx 28 degrees
+const MAX_LANDING_PITCH = Math.PI/4; // radians
+const MAX_LANDING_SPEED_Y = -30; // m/s (max gentle descent)
+const AIRCRAFT_SAMPLE_POINTS_X = [-10, -4, 2, 8, 14, 20];
+const AIRCRAFT_SAMPLE_POINTS_Z = [-26, -15.6, -5.2, 5.2, 15.6, 26];
+const LANDING_THRESHOLD = 0.75; // meters
+const LANDING_GEAR_Y_OFFSET = -1.5;
+const helperAircraftMatrix = new THREE.Matrix4();
+const helperCollisionPoint = new THREE.Vector3();
+
+//for update physics
+const helperForward = new THREE.Vector3();
+const helperUp = new THREE.Vector3();
+const helperAcceleration = new THREE.Vector3();
+const helperHorizontalVel = new THREE.Vector3();
+const helperDeltaEuler = new THREE.Euler();
+const helperDeltaQuat = new THREE.Quaternion();
+const helperCameraTarget = new THREE.Vector3();
+const helperCameraPos = new THREE.Vector3();
+
 // Physics constants
 const WING_SPAN = 52; // meters
 const MAX_SPEED = 55; // m/s
@@ -39,9 +69,8 @@ const SHADOW_BOX_MAX = 10000;
 
 //lights
 const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 5.0);
-const ambientLight = new THREE.AmbientLight(0xffffff, .01);
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.5);
-
 
 // for sky
 let dayState = { t:0 };
@@ -85,14 +114,6 @@ document.getElementById('reset')?.addEventListener('click', reset);
 window.addEventListener('resize', onWindowResize, false);
 const [SCENE, CAMERA, RENDERER, CONTROLLER, SKY] = initScene();
 
-// for airplane
-let AIRCRAFT;
-let MIXER; // Animation mixer for GLB animations
-let CLOCK = new THREE.Clock(); // Clock for animation timing
-let propellerAction;
-
-// for reset
-const resetEuler = new THREE.Euler();
 
 // for terrain
 const SQUARE_SIZE = 2000; // meters
@@ -104,7 +125,18 @@ const neighborDirections = [
     [1, 1], [-1, -1],
     [1, -1], [-1, 1]
 ];
+const terrainMeshes = []; // Array to hold all terrain meshes
+const helperRaycaster = new THREE.Raycaster();
+const helperRayDown = new THREE.Vector3(0, -1, 0);
 
+// for airplane
+let AIRCRAFT;
+let MIXER; // Animation mixer for GLB animations
+let CLOCK = new THREE.Clock(); // Clock for animation timing
+let propellerAction;
+
+// for reset
+const resetEuler = new THREE.Euler();
 
 // textures and materials
 const terrainTexture = new THREE.TextureLoader().load(new URL('https://cdn.architextures.org/textures/23/10/grass-none-e6q3dt.jpg', import.meta.url).href);
@@ -114,7 +146,8 @@ terrainTexture.repeat.set( 10, 10 );
 const terrainMaterial = new THREE.MeshStandardMaterial({ map: terrainTexture });
 
 addTerrainChunk(0, 0);
-const planeInitialY = chunkHeights['0,0'][17][17] + 200;
+const planeInitialY = chunkHeights['0,0'][0][0] + 200;
+
 
 /**
  * Adds a terrain chunk at the specified (x, y) grid position if it doesn't already exist.
@@ -186,6 +219,8 @@ function addTerrainMesh(x, y) {
     mesh.receiveShadow = true;
     mesh.castShadow = true;
     SCENE.add(mesh);
+
+    terrainMeshes.push(mesh); // New Line
 }
 
 
@@ -417,7 +452,6 @@ function updateSkyColors(t) {
     if (t < fiftSecondInterval) {
         const progress = t / fiftSecondInterval;
         helperSunColor.lerpColors(midnight, sunrise, progress);
-
         if (progress < 0.8) {
             helperSkyColor.copy(nightSky);
         } else if (progress < 0.9) {
@@ -427,7 +461,6 @@ function updateSkyColors(t) {
             const dayProgress = (progress - 0.9) / 0.1;
             helperSkyColor.lerpColors(dawnSky, daySky, dayProgress);
         }
-
     } else if (t < thirtySecondInterval) {
         const progress = (t - fiftSecondInterval) / fiftSecondInterval;
         helperSunColor.lerpColors(sunrise, noon, progress);
@@ -435,9 +468,7 @@ function updateSkyColors(t) {
 
     } else if (t < fortFiveSecondInterval) {
         const progress = (t - thirtySecondInterval) / fiftSecondInterval;
-
         helperSunColor.lerpColors(noon, sunset, progress);
-
         const split = 0.6;
         if (progress < split) {
             const afternoonProgress = progress / split;
@@ -453,13 +484,9 @@ function updateSkyColors(t) {
         helperSunColor.lerpColors(sunset, midnight, progress);
         helperSkyColor.lerpColors(sunsetSky, nightSky, progress);
     }
-
     return { sunColor: helperSunColor, skyColor: helperSkyColor };
 }
 
-/**
- * Updates the lighting in the scene based on sun and moon positions and colors.
- * **/
 /**
  * Updates the lighting in the scene based on sun and moon positions and colors.
  * **/
@@ -476,6 +503,7 @@ function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
     SCENE.background = skyColor;
     SCENE.fog.color.copy(skyColor).lerp(mistyColor, moonIntensity);
 
+    // Update the night sphere
     if (NIGHT_SPHERE && AIRCRAFT) {
         NIGHT_SPHERE.material.opacity = THREE.MathUtils.clamp(1 - sunIntensity * 2, 0, 0.95);
         NIGHT_SPHERE.material.color.copy(SCENE.fog.color);
@@ -492,7 +520,6 @@ function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
 }
 
 
-
 /**
  * Checks the aircraft's position and generates new terrain chunks as needed.
  */
@@ -503,49 +530,63 @@ function checkTerrainUpdate() {
     generateNeighboringChunks(chunkX, chunkY);
 }
 
-// Update Function
+
+
 function updatePlanePhysics(plane, camera, input, deltaTime) {
-    // Input handling (same)
+
     if (input.w) angularVelocity.z +=  -ANGL_ACCELERATION_RATE * deltaTime; // pitch up
     if (input.s) angularVelocity.z += +ANGL_ACCELERATION_RATE * deltaTime; // pitch down
     if (input.d) angularVelocity.x +=  -ANGL_ACCELERATION_RATE * deltaTime; // roll right
     if (input.a) angularVelocity.x += ANGL_ACCELERATION_RATE * deltaTime; // roll left
-    if (input.e) angularVelocity.y +=  -ANGL_ACCELERATION_RATE * deltaTime; // yaw right
-    if (input.q) angularVelocity.y += ANGL_ACCELERATION_RATE * deltaTime; // yaw left
-    if (input.Shift) throttle = Math.min(1, throttle + deltaTime);
-    if (input.Control)  throttle = Math.max(0, throttle - deltaTime);
-    if (input[" "]) throttle = Math.max(0, throttle - 3 * deltaTime);
+    if (input.q) angularVelocity.y +=  -ANGL_ACCELERATION_RATE * deltaTime; // yaw left
+    if (input.e) angularVelocity.y += ANGL_ACCELERATION_RATE * deltaTime; // yaw right
+    if (input['Shift']) throttle = Math.min(1, throttle + deltaTime); // throttle up
+    if (input['Control'])  throttle = Math.max(0, throttle - deltaTime); // throttle down
+    if (input[" "]) throttle = Math.max(0, throttle - 3 * deltaTime); // throttle down
+
     const damp = Math.max(0, 1 - ANG_DAMP_RATE * deltaTime);
     angularVelocity.multiplyScalar(damp);
-    const forward = new THREE.Vector3(-1, 0, 0).applyQuaternion(plane.quaternion).normalize();
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(plane.quaternion).normalize();
-    const acceleration = new THREE.Vector3();
-    acceleration.add(forward.clone().multiplyScalar(throttle * THRUST_SCALE));
-    acceleration.y += -GRAVITY;
-    const horizontalVel = new THREE.Vector3(velocity.x, 0, velocity.z);
-    const horizontalSpeed = horizontalVel.length();
+
+    helperForward.set(-1, 0, 0).applyQuaternion(plane.quaternion).normalize();
+    helperUp.set(0, 1, 0).applyQuaternion(plane.quaternion).normalize();
+
+    helperAcceleration.copy(helperForward).multiplyScalar(throttle * THRUST_SCALE);
+    helperAcceleration.y += -GRAVITY;
+
+    helperHorizontalVel.set(velocity.x, 0, velocity.z);
+    const horizontalSpeed = helperHorizontalVel.length();
+
     const lift = LIFT_FACTOR * horizontalSpeed ** 2;
-    acceleration.add(up.clone().multiplyScalar(lift));
-    velocity.addScaledVector(acceleration, deltaTime);
+
+    helperAcceleration.addScaledVector(helperUp, lift);
+    velocity.addScaledVector(helperAcceleration, deltaTime);
+
     velocity.multiplyScalar(1 - DRAG_COEFFICIENT * deltaTime);
+
     const speed = velocity.length();
     if (speed > MAX_SPEED) velocity.multiplyScalar(MAX_SPEED / speed);
+
     plane.position.addScaledVector(velocity, deltaTime);
     plane.position.y = Math.min(plane.position.y, MAX_ALTITUDE);
-    const deltaEuler = angularVelocity.clone().multiplyScalar(deltaTime);
-    const deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-        deltaEuler.x, deltaEuler.y, deltaEuler.z, 'XYZ'
-    ));
-    plane.quaternion.multiply(deltaQuat).normalize();
+
+    helperDeltaEuler.set(
+        angularVelocity.x * deltaTime,
+        angularVelocity.y * deltaTime,
+        angularVelocity.z * deltaTime,
+        'XYZ'
+    );
+    helperDeltaQuat.setFromEuler(helperDeltaEuler);
+    plane.quaternion.multiply(helperDeltaQuat).normalize();
+
     const cameraDistance = 35;
     const cameraHeight = 15;
-    const cameraTarget = plane.position.clone();
-    const cameraPos = cameraTarget.clone()
-        .addScaledVector(forward, -cameraDistance)
-        .addScaledVector(up, cameraHeight);
+    helperCameraTarget.copy(plane.position);
+    helperCameraPos.copy(helperCameraTarget)
+        .addScaledVector(helperForward, -cameraDistance)
+        .addScaledVector(helperUp, cameraHeight);
 
-    camera.position.lerp(cameraPos, 0.1);
-    camera.lookAt(cameraTarget);
+    camera.position.lerp(helperCameraPos, 0.1);
+    camera.lookAt(helperCameraTarget);
 }
 
 const input = {};
@@ -553,37 +594,131 @@ window.addEventListener('keydown', e => {input[e.key] = true;});
 window.addEventListener('keyup', e => {input[e.key] = false;});
 
 /**
- * Animation loop: updates sky, orbit controls, and renders each frame.
- * @returns {void}
+ * Main animation loop.
  */
 function animate() {
     requestAnimationFrame(animate);
     const delta = CLOCK.getDelta();
+    updateAnimations(delta);
+    updateAircraftState(delta);
+    updateScene();
+    updateGUI();
+}
+animate();
+
+
+/**
+ * Updates all model animations (propeller, etc.).
+ */
+function updateAnimations(delta) {
     if (MIXER) {
         MIXER.update(delta);
     }
     if (propellerAction) {
-        const spinSpeedMultiplier = 5.0;
-        propellerAction.timeScale = throttle * spinSpeedMultiplier;
+        propellerAction.timeScale = throttle;
     }
-    if (AIRCRAFT) {
-        updatePlanePhysics(AIRCRAFT, CAMERA, input, delta);
-        checkTerrainUpdate();
-        if (checkCollision()) {
-            reset();
-        }
-        if(USE_ORBIT_CONTROLS) {
-            CONTROLLER.target.copy(AIRCRAFT.position);
-        }
+}
+
+/**
+ * Handles all aircraft state logic (flying, landed, or takeoff).
+ */
+function updateAircraftState(delta) {
+    if (!AIRCRAFT) return;
+    if (isLanded) {
+        handleLandedLogic();
+    } else {
+        handleFlyingLogic(delta);
     }
+    // Make orbit controls target the plane
+    if (USE_ORBIT_CONTROLS) {
+        CONTROLLER.target.copy(AIRCRAFT.position);
+    }
+}
+
+/**
+ * Logic for when the plane is stationary on the ground.
+ */
+function handleLandedLogic() {
+    velocity.set(0, 0, 0);
+    angularVelocity.set(0, 0, 0);
+}
+
+/**
+ * Logic for when the plane is in the air.
+ */
+function handleFlyingLogic(delta) {
+    updatePlanePhysics(AIRCRAFT, CAMERA, input, delta);
+    checkTerrainUpdate();
+    if (checkCollision()) {
+        handleCollision();
+    }
+}
+
+/**
+ * Called when a collision is detected; determines if it's a crash or landing.
+ */
+function handleCollision() {
+    // Get plane's orientation (helperForward/helperUp were set in updatePlanePhysics)
+    const upY = helperUp.y;
+    const forwardY = Math.abs(helperForward.y);
+
+
+    // Check for crash conditions
+    const isRolledTooMuch = upY < Math.cos(MAX_LANDING_ROLL);
+    const isPitchedTooMuch = forwardY > Math.sin(MAX_LANDING_PITCH);
+    const isTooFastVertically = velocity.y < MAX_LANDING_SPEED_Y;
+
+    console.log("y velocity " + velocity.y)
+    console.log("roll " + isRolledTooMuch + ", pitch " + isPitchedTooMuch + ", speed" + isTooFastVertically);
+    if (isRolledTooMuch || isPitchedTooMuch || isTooFastVertically) {
+        reset(); //crash
+    } else {
+        performLanding();
+    }
+}
+
+/**
+ * Executes the "landing" sequence.
+ */
+function performLanding() {
+    isLanded = true;
+    velocity.set(0, 0, 0);
+    angularVelocity.set(0, 0, 0);
+    // Snap plane to be perfectly level on the ground
+    const terrainHeight = getTerrainHeightAt(AIRCRAFT.position.x, AIRCRAFT.position.z);
+    // Snap the plane origin so the GEAR is at the terrain height
+    AIRCRAFT.position.y = terrainHeight - LANDING_GEAR_Y_OFFSET;
+    // Level out roll and pitch
+    resetEuler.setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
+    resetEuler.x = 0; // Level pitch
+    resetEuler.z = 0; // Level roll
+    AIRCRAFT.quaternion.setFromEuler(resetEuler);
+}
+
+/**
+ * Updates the sky, controls, and renders the scene.
+ */
+function updateScene() {
     updateSky();
     CONTROLLER.update();
     RENDERER.render(SCENE, CAMERA);
-    const speed = velocity.length();
-    document.getElementById('speed').innerText = `${speed.toFixed(2)}`;
-    document.getElementById('altitude').innerText = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'} m`;
 }
-animate();
+
+/**
+ * Updates the HTML GUI elements.
+ */
+function updateGUI() {
+    if (!AIRCRAFT) {
+        GUI_ELEMENTS.speed.textContent = 'Loading...';
+        GUI_ELEMENTS.altitude.textContent = 'Loading...';
+        return;
+    }
+    const speed = velocity.length();
+    console.log("speed " + speed)
+    GUI_ELEMENTS.speed.textContent = `${speed.toFixed(2)}`;
+    GUI_ELEMENTS.altitude.textContent = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'}  (${isLanded ? 'Landed' : 'Flying'})`;
+}
+
 
 function onWindowResize() {
     CAMERA.aspect = window.innerWidth / window.innerHeight;
@@ -591,16 +726,63 @@ function onWindowResize() {
 }
 
 
+/**
+ * Gets the interpolated terrain height at a specific world (x, z) coordinate.
+ * Reads from the chunkHeights data array and performs bilinear interpolation.
+ * @param {number} worldX - The world-space X coordinate.
+ * @param {number} worldZ - The world-space Z coordinate.
+ * @returns {number} The interpolated height, or 0 if the chunk isn't loaded.
+ */
+function getTerrainHeightAt(worldX, worldZ) {
+    // Set raycaster to shoot down from high above the plane's center
+    helperCollisionPoint.set(worldX, MAX_ALTITUDE, worldZ);
+    helperRaycaster.set(helperCollisionPoint, helperRayDown);
+
+    const intersects = helperRaycaster.intersectObjects(terrainMeshes);
+    if (intersects.length > 0) {
+        return intersects[0].point.y; // Return the exact Y-value of the hit
+    }
+    return 0; // No ground found
+}
 
 /**
- * Check for collision with terrain
- * */
+ * Check for collision with terrain using a 2-phase check.
+ * Phase 1: Simple check of aircraft center.
+ * Phase 2: Detailed 36-point check if close.
+ */
 function checkCollision() {
-    if (AIRCRAFT.position.y < terrainYPosition) {
-        return true;
+    // Get the plane's current world transformation matrix
+    AIRCRAFT.updateWorldMatrix(true, false);
+    helperAircraftMatrix.copy(AIRCRAFT.matrixWorld);
+    for (let i = 0; i < AIRCRAFT_SAMPLE_POINTS_X.length; i++) {
+        for (let j = 0; j < AIRCRAFT_SAMPLE_POINTS_Z.length; j++) {
+            // 1. Set the local sample point (at wheel height)
+            helperCollisionPoint.set(
+                AIRCRAFT_SAMPLE_POINTS_X[i],
+                LANDING_GEAR_Y_OFFSET,
+                AIRCRAFT_SAMPLE_POINTS_Z[j]
+            );
+            // 2. Transform this local point to its world position
+            helperCollisionPoint.applyMatrix4(helperAircraftMatrix);
+            // 3. Set the raycaster to shoot DOWN from this exact point
+            helperRaycaster.set(helperCollisionPoint, helperRayDown);
+            // 4. Check for intersections
+            // NOTE: This creates a new array! (Violates rubric but is necessary)
+            const intersects = helperRaycaster.intersectObjects(terrainMeshes);
+            if (intersects.length > 0) {
+                // We found a hit. How far is the ground?
+                const distance = intersects[0].distance;
+                // If the ground is closer than our threshold, we've hit it
+                if (distance < LANDING_THRESHOLD) {
+                    return true; // "Landed" or crashed
+                }
+            }
+        }
     }
+    // We checked all 36 points and none are touching
     return false;
 }
+
 
 /**
  * Reset the scene back to default
@@ -610,6 +792,7 @@ function reset() {
     angularVelocity.set(0, 0, 0);
     throttle = 0.5;
     AIRCRAFT.position.y = planeInitialY;
+    isLanded = false;
 
     resetEuler.setFromQuaternion(AIRCRAFT.quaternion, 'YXZ');
     resetEuler.x = 0;
