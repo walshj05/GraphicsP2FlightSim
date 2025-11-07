@@ -341,7 +341,7 @@ function initializeSky(scene) {
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
     sky.material.uniforms.sunPosition.value = sunPosition;
     scene.add(sky);
-    scene.fog = new THREE.FogExp2('white', 0.0009);
+    scene.fog = new THREE.FogExp2('white', 0.0005);
     return { sunPosition, sky };
 }
 
@@ -501,8 +501,8 @@ function updateLighting(phi, sunIntensity, moonIntensity, sunColor, skyColor) {
     const moonLight = SKY.userData.moonLight;
     const ambient = SCENE.children.find(obj => obj.isAmbientLight);
     sunLight.intensity = THREE.MathUtils.lerp(0.0, 1.5, sunIntensity);
-    moonLight.intensity = THREE.MathUtils.lerp(0.0, 0.1, moonIntensity);
-    ambient && (ambient.intensity = THREE.MathUtils.lerp(0.0, 0.5, sunIntensity));
+    moonLight.intensity = THREE.MathUtils.lerp(0.0, 0.03, moonIntensity);
+    ambient && (ambient.intensity = THREE.MathUtils.lerp(0.03, 0.5, sunIntensity));
     sunLight.color.copy(sunColor);
     moonLight.color.copy(colorWhite);
     ambient && ambient.color.copy(colorWhite);
@@ -715,12 +715,13 @@ function updateGUI() {
         return;
     }
     const speed = velocity.length();
-    console.log("speed " + speed)
     GUI_ELEMENTS.speed.textContent = `${speed.toFixed(2)}`;
     GUI_ELEMENTS.altitude.textContent = `${AIRCRAFT ? AIRCRAFT.position.y.toFixed(2) : 'N/A'}  (${isLanded ? 'Landed' : 'Flying'})`;
 }
 
-
+/**
+ * 
+ * */
 function onWindowResize() {
     CAMERA.aspect = window.innerWidth / window.innerHeight;
     RENDERER.setSize(window.innerWidth, window.innerHeight);
