@@ -61,11 +61,12 @@ let throttle = 0.5; // range [0,1]
 // for shadows
 const SHADOW_MAP_SIZE = 4096;
 const SHADOW_CAMERA_NEAR = 500;
-const SHADOW_CAMERA_FAR = 6000;
+const SHADOW_CAMERA_FAR = 2000;
 const SHADOW_BOX_MIN = 500;
 const SHADOW_BOX_MAX = 10000;
 
 //lights
+const lightDist = 1000;
 const sunDirectionalLight = new THREE.DirectionalLight(0xffffff, 5.0);
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 const moonDirectionalLight = new THREE.DirectionalLight(0xF4F4F8, 0.5);
@@ -157,8 +158,8 @@ terrainTexture.repeat.set( 10, 10 );
 const terrainMaterial = new THREE.MeshStandardMaterial({ map: terrainTexture });
 
 // chunks
-addTerrainChunk(0, 0);
-const planeInitialY = chunkHeights['0,0'][0][0] + 200;
+generateNeighboringChunks(0, 0); // generates our initial 3x3 chunks
+const planeInitialY = getTerrainHeightAt(0, 0) + 200;
 
 
 /**
@@ -420,15 +421,12 @@ function updateTimeCycle() {
 /**
  * Updates sun and moon positions based on time
  * */
-
-
 function updateSunAndMoonPositions(t) {
     const theta = THREE.MathUtils.degToRad(180);
     const phi = THREE.MathUtils.degToRad(180 - t * 360);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
     if (AIRCRAFT) {
-        const lightDist = 1000;
         SKY.userData.sunLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, lightDist);
         SKY.userData.sunLight.target.position.copy(AIRCRAFT.position);
         SKY.userData.moonLight.position.copy(AIRCRAFT.position).addScaledVector(sunPosition, -lightDist);
@@ -537,9 +535,14 @@ function checkTerrainUpdate() {
 }
 
 
-
+/**
+ * Updates the physics of the plane based on input and elapsed time.
+ * @param {*} plane plane object
+ * @param {*} camera camera object
+ * @param {*} input input object
+ * @param {*} deltaTime time since last update in seconds
+ */
 function updatePlanePhysics(plane, camera, input, deltaTime) {
-
     if (input.w) angularVelocity.z +=  -ANGL_ACCELERATION_RATE * deltaTime; // pitch up
     if (input.s) angularVelocity.z += +ANGL_ACCELERATION_RATE * deltaTime; // pitch down
     if (input.d) angularVelocity.x +=  -ANGL_ACCELERATION_RATE * deltaTime; // roll right
@@ -720,8 +723,8 @@ function updateGUI() {
 }
 
 /**
- * 
- * */
+ * Handles window resize events to adjust camera and renderer dimensions.
+ */
 function onWindowResize() {
     CAMERA.aspect = window.innerWidth / window.innerHeight;
     RENDERER.setSize(window.innerWidth, window.innerHeight);
